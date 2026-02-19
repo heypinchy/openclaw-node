@@ -81,6 +81,7 @@ export class OpenClawClient extends EventEmitter {
 
   private reconnectAttempts = 0;
   private _isConnected = false;
+  private _shouldReconnect = true;
 
   constructor(options: OpenClawClientOptions) {
     super();
@@ -102,6 +103,7 @@ export class OpenClawClient extends EventEmitter {
    * Connect to the OpenClaw Gateway and complete the handshake.
    */
   async connect(): Promise<HelloOk> {
+    this._shouldReconnect = true;
     const WS = getWebSocket();
 
     return new Promise<HelloOk>((resolve, reject) => {
@@ -152,7 +154,7 @@ export class OpenClawClient extends EventEmitter {
    * Gracefully disconnect from the Gateway.
    */
   async disconnect(): Promise<void> {
-    this.options.autoReconnect = false;
+    this._shouldReconnect = false;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -169,7 +171,7 @@ export class OpenClawClient extends EventEmitter {
     this.send({
       type: "req",
       id,
-      method: "chat.send",
+      method: "agent",
       params: {
         message,
         sessionKey: options?.sessionKey,
@@ -183,11 +185,18 @@ export class OpenClawClient extends EventEmitter {
     let resolveChunk: (() => void) | null = null;
 
     const onMessage = (msg: ProtocolMessage) => {
-      if (msg.type === "event" && msg.payload) {
-        const text = (msg.payload as Record<string, unknown>).text as string | undefined;
-        if (text) {
-          chunks.push({ type: "text", text });
-          resolveChunk?.();
+      if (msg.type === "event") {
+        const event = msg as ProtocolEvent;
+        if (
+          event.event === "agent.chunk" &&
+          event.payload &&
+          (event.payload as Record<string, unknown>).runId === id
+        ) {
+          const text = (event.payload as Record<string, unknown>).text as string | undefined;
+          if (text) {
+            chunks.push({ type: "text", text });
+            resolveChunk?.();
+          }
         }
       }
       if (
@@ -232,6 +241,31 @@ export class OpenClawClient extends EventEmitter {
       }
     }
     return result;
+  }
+
+  /**
+   * Check the health of the Gateway connection.
+   * Uses a 5-second timeout (shorter than the default 30s for requests).
+   */
+  async health(): Promise<Record<string, unknown>> {
+    const id = this.generateId();
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error("Health check timed out"));
+      }, 5000);
+      this.pendingRequests.set(id, {
+        resolve: (res) => {
+          clearTimeout(timeout);
+          resolve(res.payload as Record<string, unknown>);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+      });
+      this.send({ type: "req", id, method: "health", params: {} });
+    });
   }
 
   /**
@@ -388,14 +422,16 @@ export class OpenClawClient extends EventEmitter {
   }
 
   private maybeReconnect(): void {
-    if (!this.options.autoReconnect) return;
+    if (!this._shouldReconnect || !this.options.autoReconnect) return;
     if (this.reconnectAttempts >= this.options.maxReconnectAttempts) {
       this.emit("error", new Error("Max reconnect attempts reached"));
       return;
     }
 
-    const delay =
-      this.options.reconnectIntervalMs * Math.pow(2, this.reconnectAttempts);
+    const delay = Math.min(
+      this.options.reconnectIntervalMs * Math.pow(2, this.reconnectAttempts),
+      30000
+    );
     this.reconnectAttempts++;
 
     setTimeout(() => {
