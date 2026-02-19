@@ -13,13 +13,13 @@ This package does that for you.
 ## Installation
 
 ```bash
-npm install @heypinchy/openclaw-node
+npm install openclaw-node
 ```
 
 ## Quick Start
 
 ```typescript
-import { OpenClawClient } from "@heypinchy/openclaw-node";
+import { OpenClawClient } from "openclaw-node";
 
 const client = new OpenClawClient({
   url: "ws://localhost:18789",
