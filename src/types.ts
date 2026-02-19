@@ -5,6 +5,15 @@
  * See: https://docs.openclaw.ai
  */
 
+// --- Connection State ---
+
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "challenging"
+  | "authenticating"
+  | "connected";
+
 // --- Roles & Auth ---
 
 export type ClientRole = "operator" | "node";

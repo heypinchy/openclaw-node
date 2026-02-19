@@ -142,8 +142,8 @@ export class OpenClawClient extends EventEmitter {
       };
 
       this.ws.addEventListener("open", onOpen);
-      this.ws.addEventListener("message", onMessage as EventListener);
-      this.ws.addEventListener("error", onError as EventListener);
+      this.ws.addEventListener("message", onMessage as never);
+      this.ws.addEventListener("error", onError as never);
       this.ws.addEventListener("close", onClose);
     });
   }
@@ -314,10 +314,10 @@ export class OpenClawClient extends EventEmitter {
       const res = msg as ProtocolResponse;
 
       // Handle connect response
-      if (res.ok && res.payload && (res.payload as HelloOk).type === "hello-ok") {
+      if (res.ok && res.payload && (res.payload as unknown as HelloOk).type === "hello-ok") {
         this._isConnected = true;
         this.reconnectAttempts = 0;
-        const helloOk = res.payload as HelloOk;
+        const helloOk = res.payload as unknown as HelloOk;
         this.emit("connected", helloOk);
         connectResolve?.(helloOk);
         return;
