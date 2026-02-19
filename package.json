@@ -1,0 +1,64 @@
+{
+  "name": "@heypinchy/openclaw-node",
+  "version": "0.1.0",
+  "description": "Node.js client for the OpenClaw Gateway WebSocket protocol",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "openclaw",
+    "ai",
+    "agent",
+    "websocket",
+    "client",
+    "llm",
+    "claude",
+    "chatbot",
+    "automation",
+    "pinchy"
+  ],
+  "author": "Clemens Helm <hey@clemenshelm.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heypinchy/openclaw-node"
+  },
+  "homepage": "https://github.com/heypinchy/openclaw-node#readme",
+  "bugs": {
+    "url": "https://github.com/heypinchy/openclaw-node/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "ws": "^8.0.0"
+  }
+}
