@@ -1,20 +1,39 @@
 # openclaw-node
 
-A Node.js client for the [OpenClaw](https://github.com/openclaw/openclaw) Gateway WebSocket protocol.
+A Node.js client for [OpenClaw](https://github.com/openclaw/openclaw) — connect your app to AI agents in a few lines of code.
 
-Connect to an OpenClaw Gateway, send messages, manage sessions, and receive streaming responses — all from Node.js.
+## What is OpenClaw?
 
-## Why?
+OpenClaw is an open-source AI agent platform. You run a **Gateway** (a local server) that manages AI agents — think of them as persistent AI assistants that can use tools, remember context, and connect to services like Slack, Telegram, or your own app.
 
-OpenClaw is a powerful AI agent platform, but there's no official Node.js client for its WebSocket API. If you want to build a web UI, a backend integration, or any custom tooling on top of OpenClaw, you need to implement the protocol yourself.
+This package lets you talk to those agents from Node.js.
 
-This package does that for you.
+## Prerequisites
+
+Before using this client, you need a running OpenClaw Gateway:
+
+```bash
+# Install OpenClaw
+npm install -g openclaw
+
+# Start the gateway
+openclaw gateway start
+```
+
+The gateway runs on `ws://localhost:18789` by default. If you've set an auth token (via `OPENCLAW_GATEWAY_TOKEN`), you'll need it for the client too.
+
+→ [Full OpenClaw setup guide](https://docs.openclaw.ai)
 
 ## Installation
 
 ```bash
 npm install openclaw-node
 ```
+
+> **Node.js 22+** works out of the box (built-in WebSocket). For Node.js 18–21, also install `ws`:
+> ```bash
+> npm install openclaw-node ws
+> ```
 
 ## Quick Start
 
@@ -23,132 +42,197 @@ import { OpenClawClient } from "openclaw-node";
 
 const client = new OpenClawClient({
   url: "ws://localhost:18789",
-  token: process.env.OPENCLAW_GATEWAY_TOKEN,
+  // Only needed if your gateway has a token set:
+  // token: process.env.OPENCLAW_GATEWAY_TOKEN,
 });
 
 await client.connect();
 
 // Send a message and stream the response
-const stream = client.chat("What's the weather like?");
+const stream = client.chat("What's the weather like in Vienna?");
 
 for await (const chunk of stream) {
-  process.stdout.write(chunk.text);
+  if (chunk.type === "text") {
+    process.stdout.write(chunk.text);
+    // Prints token by token: "The current weather in Vienna is..."
+  }
 }
+// Final chunk has type "done"
 
 await client.disconnect();
 ```
 
-## Features
+### Get a complete response (no streaming)
 
-- **Full protocol support** — Implements the OpenClaw Gateway WebSocket protocol (v3)
-- **Streaming responses** — AsyncIterator-based streaming for real-time output
-- **Session management** — Create, list, and interact with agent sessions
-- **TypeScript-first** — Full type definitions for all protocol messages
-- **Authentication** — Gateway token and device token support
-- **Auto-reconnect** — Configurable reconnection with exponential backoff
-- **Event system** — Subscribe to gateway events (exec approvals, presence, etc.)
-- **Zero dependencies** — Uses Node.js built-in `WebSocket` (Node 22+) or optional `ws` fallback
+```typescript
+const response = await client.chatSync("Summarize my last 3 meetings");
+console.log(response);
+// "Here's a summary of your recent meetings: ..."
+```
 
-## API
+## Core Concepts
 
-### `OpenClawClient`
+**Gateway** — The local server that runs your agents. This client connects to it via WebSocket. Default address: `ws://localhost:18789`.
+
+**Agent** — A configured AI assistant with its own personality, tools, and memory. The gateway can run multiple agents. Each has an `agentId`.
+
+**Session** — A conversation thread with an agent. Sessions persist across connections, so you can pick up where you left off. Each session has a `sessionKey`.
+
+**Token** — An optional auth string that protects your gateway from unauthorized access. Set it via `OPENCLAW_GATEWAY_TOKEN` on the gateway, then pass the same value to this client.
+
+## API Reference
+
+### Constructor
 
 ```typescript
 const client = new OpenClawClient({
-  // Required
-  url: string;              // Gateway WebSocket URL (ws:// or wss://)
-
-  // Optional
-  token?: string;           // Gateway auth token
-  deviceId?: string;        // Stable device identifier
-  role?: "operator" | "node"; // Connection role (default: "operator")
-  scopes?: string[];        // Requested scopes
-  autoReconnect?: boolean;  // Auto-reconnect on disconnect (default: true)
-  reconnectIntervalMs?: number; // Base reconnect interval (default: 1000)
-  maxReconnectAttempts?: number; // Max reconnect attempts (default: 10)
+  url: "ws://localhost:18789",  // Gateway address (required)
+  token: "my-secret-token",     // Auth token (optional, must match gateway)
+  autoReconnect: true,          // Reconnect on disconnect (default: true)
+  maxReconnectAttempts: 10,     // Give up after N retries (default: 10)
 });
 ```
 
-### Connection
+### Connecting
 
 ```typescript
-await client.connect();       // Connect and complete handshake
-await client.disconnect();    // Gracefully disconnect
-client.isConnected;           // Connection state
+await client.connect();    // Connect and authenticate
+await client.disconnect(); // Gracefully close
+
+client.isConnected;        // true/false
 ```
 
-### Chat
+The client handles all protocol details (challenge-response handshake, authentication, keepalive) automatically.
+
+### Chat — Streaming
 
 ```typescript
-// Stream a response
-const stream = client.chat(message, { sessionKey?, agentId? });
-for await (const chunk of stream) {
-  // chunk.type: "text" | "tool_use" | "tool_result" | "done"
-  // chunk.text: string
-}
+const stream = client.chat("Your message here", {
+  sessionKey: "optional-session-id",  // Continue a specific conversation
+  agentId: "optional-agent-id",       // Talk to a specific agent
+});
 
-// Send without streaming (returns full response)
-const response = await client.chatSync(message, { sessionKey?, agentId? });
+for await (const chunk of stream) {
+  switch (chunk.type) {
+    case "text":
+      process.stdout.write(chunk.text);  // Partial response text
+      break;
+    case "done":
+      console.log("\n--- Response complete ---");
+      break;
+  }
+}
+```
+
+### Chat — Complete Response
+
+```typescript
+const reply = await client.chatSync("What's on my calendar today?");
+// Returns the full response as a string
 ```
 
 ### Sessions
 
+Sessions are conversation threads. They persist on the gateway, so you can resume them later.
+
 ```typescript
-const sessions = await client.sessions.list({ limit?, kinds? });
-const history = await client.sessions.history(sessionKey, { limit? });
-await client.sessions.send(sessionKey, message);
+// List all sessions
+const sessions = await client.sessions.list({ limit: 10 });
+
+// Get message history for a session
+const history = await client.sessions.history("session-key-here", {
+  limit: 20,
+});
+
+// Send a message into an existing session
+await client.sessions.send("session-key-here", "Follow up on yesterday's task");
 ```
 
 ### Events
 
 ```typescript
-client.on("event", (event) => {
-  // Handle gateway events
-});
+// Connection lifecycle
+client.on("connected", (info) => console.log("Connected to gateway"));
+client.on("disconnected", ({ reason }) => console.log("Disconnected:", reason));
+client.on("error", (err) => console.error("Error:", err));
 
-client.on("connected", () => { /* ... */ });
-client.on("disconnected", (reason) => { /* ... */ });
-client.on("error", (error) => { /* ... */ });
+// Gateway events (exec approvals, presence changes, etc.)
+client.on("event", (event) => {
+  console.log("Gateway event:", event.event, event.payload);
+});
 ```
 
-### Low-level
+### Low-Level Protocol Access
+
+For advanced use cases, you can send raw protocol requests:
 
 ```typescript
-// Send raw protocol requests
-const response = await client.request(method, params);
-
-// Subscribe to raw protocol events
-client.on("protocol:event", (event) => { /* ... */ });
+const response = await client.request("status", {});
+console.log(response.payload);
 ```
 
-## Protocol Details
+## Examples
 
-This client implements the [OpenClaw Gateway WebSocket protocol](https://docs.openclaw.ai), including:
+### Express API with AI backend
 
-- **Handshake**: Challenge-response authentication with nonce signing
-- **Framing**: Request/Response/Event message types with idempotency keys
-- **Roles**: Operator (control plane) and Node (capability host) modes
-- **Streaming**: Real-time text chunks from agent responses
+```typescript
+import express from "express";
+import { OpenClawClient } from "openclaw-node";
+
+const app = express();
+const client = new OpenClawClient({ url: "ws://localhost:18789" });
+
+await client.connect();
+
+app.post("/api/ask", express.json(), async (req, res) => {
+  const answer = await client.chatSync(req.body.question);
+  res.json({ answer });
+});
+
+app.listen(3000);
+```
+
+### CLI chatbot
+
+```typescript
+import readline from "readline";
+import { OpenClawClient } from "openclaw-node";
+
+const client = new OpenClawClient({ url: "ws://localhost:18789" });
+await client.connect();
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+rl.on("line", async (input) => {
+  for await (const chunk of client.chat(input)) {
+    if (chunk.type === "text") process.stdout.write(chunk.text);
+  }
+  console.log();
+});
+```
+
+## Features
+
+- **Streaming** — AsyncIterator-based, get responses token by token
+- **Auto-reconnect** — Exponential backoff, configurable retries
+- **TypeScript-first** — Full type definitions for all protocol messages
+- **Zero config** — Handles the full WebSocket protocol (handshake, auth, keepalive) for you
+- **Lightweight** — Zero required dependencies on Node.js 22+
 
 ## Built for Pinchy
 
-This client was extracted from [Pinchy](https://github.com/heypinchy/pinchy), an open-source web UI for OpenClaw with multi-user support. It works great standalone — use it to build your own OpenClaw integrations.
-
-## Requirements
-
-- Node.js 22+ (uses built-in `WebSocket`) or Node.js 18+ with `ws` package
-- OpenClaw Gateway running and accessible
+This client was extracted from [Pinchy](https://github.com/heypinchy/pinchy), an open-source web UI for OpenClaw with multi-user support, agent permissions, and a dashboard. It works great standalone — use it to build your own OpenClaw integrations.
 
 ## Contributing
 
-Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md) before submitting a PR.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE) — use it however you want.
+[MIT](LICENSE)
 
 ## Links
 
-- [Pinchy](https://heypinchy.com) — Open-source web UI for OpenClaw
 - [OpenClaw](https://github.com/openclaw/openclaw) — The AI agent platform
-- [OpenClaw Gateway Protocol Docs](https://docs.openclaw.ai)
+- [Pinchy](https://heypinchy.com) — Open-source web UI for OpenClaw
+- [OpenClaw Docs](https://docs.openclaw.ai) — Gateway setup and configuration
