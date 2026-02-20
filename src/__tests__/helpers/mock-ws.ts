@@ -58,10 +58,14 @@ export function installMockWebSocket() {
     class extends MockWebSocket {
       constructor() {
         super();
-        _mockWs = this;
+        setMockWs(this);
       }
     }
   );
+}
+
+function setMockWs(ws: MockWebSocket) {
+  _mockWs = ws;
 }
 
 export async function completeHandshake(

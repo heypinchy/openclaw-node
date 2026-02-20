@@ -1,6 +1,6 @@
 {
   "name": "openclaw-node",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Node.js client for the OpenClaw Gateway WebSocket protocol",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -64,6 +64,7 @@
     "eslint": "^9.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.0",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {

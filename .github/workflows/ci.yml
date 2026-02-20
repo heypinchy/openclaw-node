@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: "Node ${{ matrix.node-version }}${{ matrix.label || '' }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22]
+        strip-ws: [false]
+        include:
+          - node-version: 22
+            strip-ws: true
+            label: " (no ws)"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Strip ws optional dependency
+        if: matrix.strip-ws
+        run: rm -rf node_modules/ws
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify CJS export
+        run: node -e "const m = require('./dist/index.js'); if (!m.OpenClawClient) throw new Error('CJS export missing')"
+
+      - name: Verify ESM export
+        run: node --input-type=module -e "import { OpenClawClient } from './dist/index.mjs'; if (!OpenClawClient) throw new Error('ESM export missing')"
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: pnpm audit --prod
