@@ -1,11 +1,12 @@
 import { EventEmitter } from "events";
-import type {
-  ClientRole,
-  ConnectParams,
-  HelloOk,
-  ProtocolEvent,
-  ProtocolMessage,
-  ProtocolResponse,
+import {
+  isValidProtocolMessage,
+  type ClientRole,
+  type ConnectParams,
+  type HelloOk,
+  type ProtocolEvent,
+  type ProtocolMessage,
+  type ProtocolResponse,
 } from "./types";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
@@ -44,6 +45,8 @@ export interface OpenClawClientOptions {
   reconnectIntervalMs?: number;
   /** Max reconnect attempts (default: 10) */
   maxReconnectAttempts?: number;
+  /** Maximum incoming message size in bytes (default: 5 * 1024 * 1024) */
+  maxMessageSize?: number;
 }
 
 export interface ChatOptions {
@@ -70,6 +73,7 @@ export class OpenClawClient extends EventEmitter {
       | "autoReconnect"
       | "reconnectIntervalMs"
       | "maxReconnectAttempts"
+      | "maxMessageSize"
     >
   > &
     OpenClawClientOptions;
@@ -91,8 +95,17 @@ export class OpenClawClient extends EventEmitter {
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 10,
+      maxMessageSize: 5 * 1024 * 1024,
       ...options,
     };
+
+    if (this.options.token && this.options.url.startsWith("ws://")) {
+      process.emitWarning(
+        "Connecting with authentication token over insecure ws:// transport. " +
+          "Use wss:// in production to prevent token interception.",
+        "InsecureTransportWarning"
+      );
+    }
   }
 
   get isConnected(): boolean {
@@ -123,9 +136,27 @@ export class OpenClawClient extends EventEmitter {
           typeof event === "object" && "data" in event
             ? String(event.data)
             : String(event);
+        if (data.length > this.options.maxMessageSize) {
+          this.emit(
+            "error",
+            new Error(
+              `Message size ${data.length} exceeds limit of ${this.options.maxMessageSize} bytes`
+            )
+          );
+          return;
+        }
         try {
-          const msg: ProtocolMessage = JSON.parse(data);
-          this.handleMessage(msg, resolve);
+          const parsed: unknown = JSON.parse(data);
+          if (!isValidProtocolMessage(parsed)) {
+            this.emit(
+              "error",
+              new Error(
+                `Invalid protocol message: unexpected type "${(parsed as Record<string, unknown>)?.type}"`
+              )
+            );
+            return;
+          }
+          this.handleMessage(parsed, resolve);
         } catch {
           // Ignore unparseable messages
         }

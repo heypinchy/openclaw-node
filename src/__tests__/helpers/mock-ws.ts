@@ -32,6 +32,12 @@ export class MockWebSocket {
     }
   }
 
+  simulateRawMessage(raw: string) {
+    for (const cb of this.listeners["message"] || []) {
+      cb({ data: raw });
+    }
+  }
+
   simulateOpen() {
     for (const cb of this.listeners["open"] || []) cb();
   }

@@ -58,6 +58,17 @@ jobs:
       - name: Verify ESM export
         run: node --input-type=module -e "import { OpenClawClient } from './dist/index.mjs'; if (!OpenClawClient) throw new Error('ESM export missing')"
 
+      - name: Verify package contents
+        if: matrix.node-version == 22 && !matrix.strip-ws
+        run: |
+          pnpm pack
+          tar tzf openclaw-node-*.tgz | sort
+          # Fail if test files, source maps, or config files leak into the tarball
+          if tar tzf openclaw-node-*.tgz | grep -qE '(\.test\.|\.spec\.|tsconfig|eslint|\.env)'; then
+            echo "ERROR: Unexpected files in package tarball!"
+            exit 1
+          fi
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest
@@ -74,5 +85,5 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Audit dependencies
+      - name: Audit production dependencies
         run: pnpm audit --prod

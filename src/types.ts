@@ -58,6 +58,22 @@ export interface ProtocolEvent {
 
 export type ProtocolMessage = ProtocolRequest | ProtocolResponse | ProtocolEvent;
 
+export function isValidProtocolMessage(msg: unknown): msg is ProtocolMessage {
+  if (typeof msg !== "object" || msg === null) return false;
+  const obj = msg as Record<string, unknown>;
+
+  if (obj.type === "req") {
+    return typeof obj.id === "string" && typeof obj.method === "string";
+  }
+  if (obj.type === "res") {
+    return typeof obj.id === "string" && typeof obj.ok === "boolean";
+  }
+  if (obj.type === "event") {
+    return typeof obj.event === "string";
+  }
+  return false;
+}
+
 // --- Connect ---
 
 export interface ConnectParams {
