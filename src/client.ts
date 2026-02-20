@@ -3,6 +3,7 @@ import {
   isValidProtocolMessage,
   type ClientRole,
   type ConnectParams,
+  type ContentPart,
   type HelloOk,
   type ProtocolEvent,
   type ProtocolMessage,
@@ -211,7 +212,7 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Send a chat message and return an async iterator of response chunks.
    */
-  async *chat(message: string, options?: ChatOptions): AsyncGenerator<ChatChunk> {
+  async *chat(message: string | ContentPart[], options?: ChatOptions): AsyncGenerator<ChatChunk> {
     const id = this.generateId();
 
     this.send({
@@ -226,22 +227,31 @@ export class OpenClawClient extends EventEmitter {
       },
     });
 
-    // Collect streaming chunks until done
+    // Collect streaming chunks until done.
+    // OpenClaw sends cumulative text in "agent" events (stream: "assistant"),
+    // so we track the previous length and yield only the new portion.
     const chunks: ChatChunk[] = [];
     let done = false;
     let resolveChunk: (() => void) | null = null;
+    let cumulativeLength = 0;
 
     const onMessage = (msg: ProtocolMessage) => {
       if (msg.type === "event") {
         const event = msg as ProtocolEvent;
         if (
-          event.event === "agent.chunk" &&
+          event.event === "agent" &&
           event.payload &&
-          (event.payload as Record<string, unknown>).runId === id
+          (event.payload as Record<string, unknown>).runId === id &&
+          (event.payload as Record<string, unknown>).stream === "assistant"
         ) {
-          const text = (event.payload as Record<string, unknown>).text as string | undefined;
-          if (text) {
-            chunks.push({ type: "text", text });
+          const data = (event.payload as Record<string, unknown>).data as
+            | Record<string, unknown>
+            | undefined;
+          const text = data?.text as string | undefined;
+          if (text && text.length > cumulativeLength) {
+            const newText = text.slice(cumulativeLength);
+            cumulativeLength = text.length;
+            chunks.push({ type: "text", text: newText });
             resolveChunk?.();
           }
         }
@@ -250,6 +260,18 @@ export class OpenClawClient extends EventEmitter {
         msg.type === "res" &&
         (msg as ProtocolResponse).id === id
       ) {
+        const res = msg as ProtocolResponse;
+        const payload = res.payload as
+          | Record<string, unknown>
+          | undefined;
+        // Ignore "accepted" responses; only terminate on final "ok" response
+        if (payload?.status === "accepted") {
+          return;
+        }
+        // Propagate error responses as error chunks
+        if (!res.ok && res.error?.message) {
+          chunks.push({ type: "error", text: res.error.message });
+        }
         done = true;
         resolveChunk?.();
       }
@@ -280,7 +302,7 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Send a chat message and return the complete response.
    */
-  async chatSync(message: string, options?: ChatOptions): Promise<string> {
+  async chatSync(message: string | ContentPart[], options?: ChatOptions): Promise<string> {
     let result = "";
     for await (const chunk of this.chat(message, options)) {
       if (chunk.type === "text") {

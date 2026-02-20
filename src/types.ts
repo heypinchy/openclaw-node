@@ -114,6 +114,20 @@ export interface HelloOk {
   };
 }
 
+// --- Content Parts (multimodal) ---
+
+export interface TextContentPart {
+  type: "text";
+  text: string;
+}
+
+export interface ImageUrlContentPart {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export type ContentPart = TextContentPart | ImageUrlContentPart;
+
 // --- Chat ---
 
 export interface ChatMessage {

@@ -12,4 +12,7 @@ export type {
   ProtocolMessage,
   ClientRole,
   ClientEventMap,
+  TextContentPart,
+  ImageUrlContentPart,
+  ContentPart,
 } from "./types";
