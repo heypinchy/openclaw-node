@@ -135,6 +135,10 @@ export class OpenClawClient extends EventEmitter {
         const error = err instanceof Error ? err : new Error("WebSocket connection failed");
         this.emit("error", error);
         reject(error);
+        // Node.js built-in WebSocket does not fire "close" after connection error,
+        // so trigger reconnect directly from the error handler as well.
+        this._isConnected = false;
+        this.maybeReconnect();
       };
 
       const onClose = () => {
@@ -379,10 +383,10 @@ export class OpenClawClient extends EventEmitter {
       minProtocol: PROTOCOL_VERSION,
       maxProtocol: PROTOCOL_VERSION,
       client: {
-        id: this.options.clientId || "openclaw-node",
+        id: this.options.clientId || "gateway-client",
         version: this.options.clientVersion || "0.1.0",
         platform: process.platform,
-        mode: this.options.role || "operator",
+        mode: "backend",
       },
       role: this.options.role || "operator",
       scopes: this.options.scopes || DEFAULT_SCOPES,
