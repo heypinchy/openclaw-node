@@ -222,6 +222,7 @@ export class OpenClawClient extends EventEmitter {
         message,
         sessionKey: options?.sessionKey,
         agentId: options?.agentId,
+        idempotencyKey: id,
       },
     });
 
