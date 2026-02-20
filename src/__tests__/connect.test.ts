@@ -1,16 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { OpenClawClient } from "../client";
 import { installMockWebSocket, getMockWs } from "./helpers/mock-ws";
 
 describe("Connect/handshake", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(() => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-connect-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
       token: "test-token",
-      deviceId: "device-123",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       clientId: "my-client",
       clientVersion: "1.2.3",
       autoReconnect: false,
@@ -20,6 +25,7 @@ describe("Connect/handshake", () => {
   afterEach(async () => {
     await client.disconnect();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("completes the full handshake: challenge -> connect -> hello-ok", async () => {
@@ -131,9 +137,13 @@ describe("Connect/handshake", () => {
     expect(params.client.id).toBe("my-client");
     expect(params.client.version).toBe("1.2.3");
 
-    // Verify device ID is included
+    // Verify signed device identity is included
     expect(params.device).toBeDefined();
-    expect(params.device.id).toBe("device-123");
+    expect(params.device.id).toMatch(/^[a-f0-9]{64}$/); // SHA-256 hex
+    expect(params.device.publicKey).toBeDefined();
+    expect(params.device.signature).toBeDefined();
+    expect(typeof params.device.signedAt).toBe("number");
+    expect(params.device.nonce).toBe("nonce-xyz");
 
     // Verify auth token
     expect(params.auth.token).toBe("test-token");

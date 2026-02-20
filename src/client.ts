@@ -8,6 +8,11 @@ import {
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
+import {
+  loadOrCreateDeviceIdentity,
+  buildSignedDevice,
+  type DeviceIdentityData,
+} from "./device";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
@@ -29,8 +34,8 @@ export interface OpenClawClientOptions {
   url: string;
   /** Gateway auth token */
   token?: string;
-  /** Stable device identifier */
-  deviceId?: string;
+  /** Path to device identity file (default: ~/.openclaw/device-identity.json) */
+  deviceIdentityPath?: string;
   /** Connection role (default: "operator") */
   role?: ClientRole;
   /** Requested scopes (default: operator read+write) */
@@ -86,6 +91,7 @@ export class OpenClawClient extends EventEmitter {
   private reconnectAttempts = 0;
   private _isConnected = false;
   private _shouldReconnect = true;
+  private deviceIdentity: DeviceIdentityData | null = null;
 
   constructor(options: OpenClawClientOptions) {
     super();
@@ -106,6 +112,11 @@ export class OpenClawClient extends EventEmitter {
         "InsecureTransportWarning"
       );
     }
+
+    this.deviceIdentity = loadOrCreateDeviceIdentity(
+      this.options.deviceIdentityPath ||
+        `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`
+    );
   }
 
   get isConnected(): boolean {
@@ -410,17 +421,33 @@ export class OpenClawClient extends EventEmitter {
   }
 
   private sendConnectRequest(challenge: { nonce: string; ts: number }): void {
+    const clientId = this.options.clientId || "gateway-client";
+    const role = this.options.role || "operator";
+    const scopes = this.options.scopes || DEFAULT_SCOPES;
+
+    const device = this.deviceIdentity
+      ? buildSignedDevice({
+          identity: this.deviceIdentity,
+          nonce: challenge.nonce,
+          clientId,
+          clientMode: "backend",
+          role,
+          scopes,
+          token: this.options.token,
+        })
+      : undefined;
+
     const params: ConnectParams = {
       minProtocol: PROTOCOL_VERSION,
       maxProtocol: PROTOCOL_VERSION,
       client: {
-        id: this.options.clientId || "gateway-client",
+        id: clientId,
         version: this.options.clientVersion || "0.1.0",
         platform: process.platform,
         mode: "backend",
       },
-      role: this.options.role || "operator",
-      scopes: this.options.scopes || DEFAULT_SCOPES,
+      role,
+      scopes,
       caps: [],
       commands: [],
       permissions: {},
@@ -429,12 +456,7 @@ export class OpenClawClient extends EventEmitter {
       },
       locale: Intl.DateTimeFormat().resolvedOptions().locale || "en-US",
       userAgent: `openclaw-node/0.1.0`,
-      ...(this.options.deviceId && {
-        device: {
-          id: this.options.deviceId,
-          nonce: challenge.nonce,
-        },
-      }),
+      ...(device && { device }),
     };
 
     this.send({
