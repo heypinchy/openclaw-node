@@ -475,6 +475,67 @@ describe("Chat streaming", () => {
     await abortPromise;
   });
 
+  it("chatAbort terminates the active chat generator", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const sessionKey = "abort-test-session";
+    const chunks: { type: string; text: string }[] = [];
+    let generatorDone = false;
+
+    const gen = client.chat("Tell me a long story", { sessionKey });
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+      generatorDone = true;
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    // Send accepted response
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Stream some text
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "assistant", data: { text: "Once upon" } },
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(generatorDone).toBe(false);
+
+    // Now abort — this should terminate the generator locally
+    const abortSentBefore = ws.sent.length;
+    const abortPromise = client.chatAbort(sessionKey);
+
+    // Respond to the abort request
+    const abortMsg = JSON.parse(ws.sent[abortSentBefore]);
+    ws.simulateMessage({
+      type: "res",
+      id: abortMsg.id,
+      ok: true,
+      payload: { status: "ok" },
+    });
+
+    await abortPromise;
+    await consumePromise;
+
+    expect(generatorDone).toBe(true);
+    const doneChunk = chunks.find((c) => c.type === "done");
+    expect(doneChunk).toBeDefined();
+  });
+
   it("yields error chunk when response has ok: false", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;

@@ -211,6 +211,14 @@ rl.on("line", async (input) => {
 });
 ```
 
+## Compatibility
+
+| openclaw-node | Gateway Protocol | OpenClaw Gateway |
+|---------------|-----------------|------------------|
+| 0.1.x         | v3              | 0.x (current)    |
+
+If the OpenClaw Gateway bumps its protocol version, you'll need a matching openclaw-node release. Check this table to find the right version.
+
 ## Features
 
 - **Streaming** — AsyncIterator-based, get responses token by token

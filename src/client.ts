@@ -96,6 +96,8 @@ export class OpenClawClient extends EventEmitter {
     { resolve: (value: ProtocolResponse) => void; reject: (error: Error) => void }
   >();
 
+  private _activeChats = new Map<string, () => void>();
+
   private reconnectAttempts = 0;
   private _isConnected = false;
   private _shouldReconnect = true;
@@ -249,6 +251,13 @@ export class OpenClawClient extends EventEmitter {
     let resolveChunk: (() => void) | null = null;
     let cumulativeLength = 0;
 
+    // Register in _activeChats so chatAbort() can terminate this generator
+    const abortKey = options?.sessionKey || id;
+    this._activeChats.set(abortKey, () => {
+      done = true;
+      resolveChunk?.();
+    });
+
     const onMessage = (msg: ProtocolMessage) => {
       if (msg.type === "event") {
         const event = msg as ProtocolEvent;
@@ -310,6 +319,7 @@ export class OpenClawClient extends EventEmitter {
       yield { type: "done", text: "" };
     } finally {
       this.off("_raw", onMessage);
+      this._activeChats.delete(abortKey);
     }
   }
 
@@ -330,6 +340,9 @@ export class OpenClawClient extends EventEmitter {
    * Abort a running chat in the given session.
    */
   async chatAbort(sessionKey: string, runId?: string): Promise<Record<string, unknown> | undefined> {
+    // Terminate the local generator immediately so it doesn't hang
+    this._activeChats.get(sessionKey)?.();
+
     const params: Record<string, unknown> = { sessionKey };
     if (runId !== undefined) {
       params.runId = runId;
