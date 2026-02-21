@@ -1,9 +1,9 @@
 import { EventEmitter } from "events";
 import {
   isValidProtocolMessage,
+  type ChatAttachment,
   type ClientRole,
   type ConnectParams,
-  type ContentPart,
   type HelloOk,
   type ProtocolEvent,
   type ProtocolMessage,
@@ -58,6 +58,7 @@ export interface OpenClawClientOptions {
 export interface ChatOptions {
   sessionKey?: string;
   agentId?: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface ChatChunk {
@@ -212,7 +213,7 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Send a chat message and return an async iterator of response chunks.
    */
-  async *chat(message: string | ContentPart[], options?: ChatOptions): AsyncGenerator<ChatChunk> {
+  async *chat(message: string, options?: ChatOptions): AsyncGenerator<ChatChunk> {
     const id = this.generateId();
 
     this.send({
@@ -223,6 +224,7 @@ export class OpenClawClient extends EventEmitter {
         message,
         sessionKey: options?.sessionKey,
         agentId: options?.agentId,
+        ...(options?.attachments && { attachments: options.attachments }),
         idempotencyKey: id,
       },
     });
@@ -302,7 +304,7 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Send a chat message and return the complete response.
    */
-  async chatSync(message: string | ContentPart[], options?: ChatOptions): Promise<string> {
+  async chatSync(message: string, options?: ChatOptions): Promise<string> {
     let result = "";
     for await (const chunk of this.chat(message, options)) {
       if (chunk.type === "text") {

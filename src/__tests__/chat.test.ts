@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
-import type { ContentPart } from "../types";
 import {
   installMockWebSocket,
   getMockWs,
@@ -316,22 +315,24 @@ describe("Chat streaming", () => {
     expect(chunks).toEqual(["Right"]);
   });
 
-  it("sends structured content array as params.message when ContentPart[] is passed", async () => {
+  it("sends attachments in request params when provided", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const content: ContentPart[] = [
-      { type: "text", text: "What is in this image?" },
-      { type: "image_url", image_url: { url: "data:image/png;base64,abc123" } },
-    ];
-
-    const gen = client.chat(content);
+    const gen = client.chat("What is in this image?", {
+      attachments: [
+        { mimeType: "image/png", content: "abc123base64data" },
+      ],
+    });
     const iterPromise = gen.next();
 
     const sentMsg = JSON.parse(ws.sent[sentBefore]);
     expect(sentMsg.type).toBe("req");
     expect(sentMsg.method).toBe("agent");
-    expect(sentMsg.params.message).toEqual(content);
+    expect(sentMsg.params.message).toBe("What is in this image?");
+    expect(sentMsg.params.attachments).toEqual([
+      { mimeType: "image/png", content: "abc123base64data" },
+    ]);
 
     // Clean up
     ws.simulateMessage({
@@ -353,7 +354,7 @@ describe("Chat streaming", () => {
     }
   });
 
-  it("still sends plain string as params.message when string is passed", async () => {
+  it("omits attachments from params when not provided", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
@@ -362,6 +363,7 @@ describe("Chat streaming", () => {
 
     const sentMsg = JSON.parse(ws.sent[sentBefore]);
     expect(sentMsg.params.message).toBe("Hello plain");
+    expect(sentMsg.params.attachments).toBeUndefined();
 
     // Clean up
     ws.simulateMessage({

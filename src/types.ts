@@ -114,19 +114,18 @@ export interface HelloOk {
   };
 }
 
-// --- Content Parts (multimodal) ---
+// --- Chat Attachments ---
 
-export interface TextContentPart {
-  type: "text";
-  text: string;
+export interface ChatAttachment {
+  /** Optional type hint (e.g. "image") */
+  type?: string;
+  /** MIME type (e.g. "image/png") */
+  mimeType?: string;
+  /** File name */
+  fileName?: string;
+  /** Base64-encoded content */
+  content: string;
 }
-
-export interface ImageUrlContentPart {
-  type: "image_url";
-  image_url: { url: string };
-}
-
-export type ContentPart = TextContentPart | ImageUrlContentPart;
 
 // --- Chat ---
 

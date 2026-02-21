@@ -12,7 +12,5 @@ export type {
   ProtocolMessage,
   ClientRole,
   ClientEventMap,
-  TextContentPart,
-  ImageUrlContentPart,
-  ContentPart,
+  ChatAttachment,
 } from "./types";
