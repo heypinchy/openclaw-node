@@ -59,6 +59,12 @@ export interface ChatOptions {
   sessionKey?: string;
   agentId?: string;
   attachments?: ChatAttachment[];
+  thinking?: string;
+  deliver?: boolean;
+  channel?: string;
+  extraSystemPrompt?: string;
+  label?: string;
+  timeout?: number;
 }
 
 export interface ChatChunk {
@@ -225,6 +231,12 @@ export class OpenClawClient extends EventEmitter {
         sessionKey: options?.sessionKey,
         agentId: options?.agentId,
         ...(options?.attachments && { attachments: options.attachments }),
+        ...(options?.thinking !== undefined && { thinking: options.thinking }),
+        ...(options?.deliver !== undefined && { deliver: options.deliver }),
+        ...(options?.channel !== undefined && { channel: options.channel }),
+        ...(options?.extraSystemPrompt !== undefined && { extraSystemPrompt: options.extraSystemPrompt }),
+        ...(options?.label !== undefined && { label: options.label }),
+        ...(options?.timeout !== undefined && { timeout: options.timeout }),
         idempotencyKey: id,
       },
     });
@@ -315,6 +327,18 @@ export class OpenClawClient extends EventEmitter {
   }
 
   /**
+   * Abort a running chat in the given session.
+   */
+  async chatAbort(sessionKey: string, runId?: string): Promise<Record<string, unknown> | undefined> {
+    const params: Record<string, unknown> = { sessionKey };
+    if (runId !== undefined) {
+      params.runId = runId;
+    }
+    const res = await this.request("chat.abort", params);
+    return res.payload;
+  }
+
+  /**
    * Check the health of the Gateway connection.
    * Uses a 5-second timeout (shorter than the default 30s for requests).
    */
@@ -348,16 +372,37 @@ export class OpenClawClient extends EventEmitter {
       return res.payload;
     },
     history: async (sessionKey: string, options?: { limit?: number }) => {
-      const res = await this.request("sessions.history", {
+      const res = await this.request("chat.history", {
         sessionKey,
         ...options,
       });
       return res.payload;
     },
     send: async (sessionKey: string, message: string) => {
-      const res = await this.request("sessions.send", {
+      const res = await this.request("chat.send", {
         sessionKey,
         message,
+      });
+      return res.payload;
+    },
+    delete: async (key: string, options?: { deleteTranscript?: boolean }) => {
+      const res = await this.request("sessions.delete", {
+        key,
+        ...options,
+      });
+      return res.payload;
+    },
+    reset: async (key: string, options?: { reason?: "new" | "reset" }) => {
+      const res = await this.request("sessions.reset", {
+        key,
+        ...options,
+      });
+      return res.payload;
+    },
+    compact: async (key: string, options?: { maxLines?: number }) => {
+      const res = await this.request("sessions.compact", {
+        key,
+        ...options,
       });
       return res.payload;
     },

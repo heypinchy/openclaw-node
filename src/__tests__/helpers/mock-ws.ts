@@ -93,7 +93,7 @@ export async function completeHandshake(
     payload: {
       type: "hello-ok",
       protocol: 3,
-      policy: { tickIntervalMs: 15000 },
+      policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
     },
   });
   await connectPromise;

@@ -6,6 +6,8 @@ import type {
   ProtocolEvent,
   ProtocolMessage,
   ConnectChallenge,
+  ConnectParams,
+  AuthParams,
   HelloOk,
 } from "../types";
 
@@ -88,6 +90,24 @@ describe("Protocol types", () => {
       expect(res.error?.code).toBe("NOT_FOUND");
       expect(res.error?.message).toBe("Resource not found");
     });
+
+    it("error can include details, retryable, and retryAfterMs", () => {
+      const res: ProtocolResponse = {
+        type: "res",
+        id: "123",
+        ok: false,
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests",
+          details: { limit: 100 },
+          retryable: true,
+          retryAfterMs: 5000,
+        },
+      };
+      expect(res.error?.details).toEqual({ limit: 100 });
+      expect(res.error?.retryable).toBe(true);
+      expect(res.error?.retryAfterMs).toBe(5000);
+    });
   });
 
   describe("ProtocolEvent", () => {
@@ -106,11 +126,11 @@ describe("Protocol types", () => {
         event: "chat.chunk",
         payload: { text: "hello" },
         seq: 1,
-        stateVersion: 42,
+        stateVersion: { presence: 5, health: 3 },
       };
       expect(evt.payload).toEqual({ text: "hello" });
       expect(evt.seq).toBe(1);
-      expect(evt.stateVersion).toBe(42);
+      expect(evt.stateVersion).toEqual({ presence: 5, health: 3 });
     });
   });
 
@@ -191,18 +211,20 @@ describe("Protocol types", () => {
       const hello: HelloOk = {
         type: "hello-ok",
         protocol: 3,
-        policy: { tickIntervalMs: 15000 },
+        policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
       };
       expect(hello.type).toBe("hello-ok");
       expect(hello.protocol).toBe(3);
       expect(hello.policy.tickIntervalMs).toBe(15000);
+      expect(hello.policy.maxPayload).toBe(25000000);
+      expect(hello.policy.maxBufferedBytes).toBe(50000000);
     });
 
     it("can include optional auth info", () => {
       const hello: HelloOk = {
         type: "hello-ok",
         protocol: 3,
-        policy: { tickIntervalMs: 15000 },
+        policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
         auth: {
           deviceToken: "token-123",
           role: "operator",
@@ -212,6 +234,88 @@ describe("Protocol types", () => {
       expect(hello.auth?.deviceToken).toBe("token-123");
       expect(hello.auth?.role).toBe("operator");
       expect(hello.auth?.scopes).toEqual(["operator.read", "operator.write"]);
+    });
+
+    it("can include server info, features, and canvasHostUrl", () => {
+      const hello: HelloOk = {
+        type: "hello-ok",
+        protocol: 3,
+        policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
+        server: {
+          version: "1.2.3",
+          commit: "abc123",
+          host: "gateway-1",
+          connId: "conn-456",
+        },
+        features: {
+          methods: ["health", "agent", "chat.history"],
+          events: ["connect.challenge", "agent", "tick"],
+        },
+        canvasHostUrl: "https://canvas.example.com",
+      };
+      expect(hello.server?.version).toBe("1.2.3");
+      expect(hello.server?.connId).toBe("conn-456");
+      expect(hello.features?.methods).toContain("health");
+      expect(hello.features?.events).toContain("tick");
+      expect(hello.canvasHostUrl).toBe("https://canvas.example.com");
+    });
+  });
+
+  describe("ConnectParams", () => {
+    it("accepts minimal connect params with only required fields", () => {
+      const params: ConnectParams = {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: "gateway-client",
+          version: "0.1.0",
+          platform: "darwin",
+          mode: "backend",
+        },
+      };
+      expect(params.minProtocol).toBe(3);
+      expect(params.client.id).toBe("gateway-client");
+    });
+
+    it("accepts all optional fields", () => {
+      const params: ConnectParams = {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: "gateway-client",
+          version: "0.1.0",
+          platform: "darwin",
+          mode: "backend",
+          displayName: "My Client",
+          deviceFamily: "MacBookPro",
+          modelIdentifier: "Mac14,5",
+          instanceId: "inst-123",
+        },
+        role: "operator",
+        scopes: ["operator.read"],
+        caps: ["streaming"],
+        commands: [],
+        permissions: { "tool.exec": true },
+        pathEnv: "/usr/bin",
+        auth: { token: "tok-123", password: "secret" },
+        locale: "en-US",
+        userAgent: "openclaw-node/0.1.0",
+      };
+      expect(params.client.displayName).toBe("My Client");
+      expect(params.pathEnv).toBe("/usr/bin");
+      expect(params.auth?.password).toBe("secret");
+    });
+  });
+
+  describe("AuthParams", () => {
+    it("accepts token, deviceToken, and password", () => {
+      const auth: AuthParams = {
+        token: "tok-123",
+        deviceToken: "dev-456",
+        password: "secret",
+      };
+      expect(auth.token).toBe("tok-123");
+      expect(auth.password).toBe("secret");
     });
   });
 });

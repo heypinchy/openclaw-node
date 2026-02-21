@@ -29,6 +29,7 @@ export interface DeviceIdentity {
 export interface AuthParams {
   token?: string;
   deviceToken?: string;
+  password?: string;
 }
 
 // --- Protocol Framing ---
@@ -45,7 +46,13 @@ export interface ProtocolResponse {
   id: string;
   ok: boolean;
   payload?: Record<string, unknown>;
-  error?: { code: string; message: string };
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+    retryable?: boolean;
+    retryAfterMs?: number;
+  };
 }
 
 export interface ProtocolEvent {
@@ -53,7 +60,7 @@ export interface ProtocolEvent {
   event: string;
   payload?: Record<string, unknown>;
   seq?: number;
-  stateVersion?: number;
+  stateVersion?: unknown;
 }
 
 export type ProtocolMessage = ProtocolRequest | ProtocolResponse | ProtocolEvent;
@@ -81,18 +88,23 @@ export interface ConnectParams {
   maxProtocol: number;
   client: {
     id: string;
+    displayName?: string;
     version: string;
     platform: string;
+    deviceFamily?: string;
+    modelIdentifier?: string;
     mode: string;
+    instanceId?: string;
   };
-  role: ClientRole;
-  scopes: string[];
-  caps: string[];
-  commands: string[];
-  permissions: Record<string, boolean>;
-  auth: AuthParams;
-  locale: string;
-  userAgent: string;
+  role?: ClientRole;
+  scopes?: string[];
+  caps?: string[];
+  commands?: string[];
+  permissions?: Record<string, boolean>;
+  pathEnv?: string;
+  auth?: AuthParams;
+  locale?: string;
+  userAgent?: string;
   device?: DeviceIdentity;
 }
 
@@ -104,13 +116,28 @@ export interface ConnectChallenge {
 export interface HelloOk {
   type: "hello-ok";
   protocol: number;
-  policy: {
-    tickIntervalMs: number;
+  server?: {
+    version: string;
+    commit?: string;
+    host?: string;
+    connId: string;
   };
+  features?: {
+    methods: string[];
+    events: string[];
+  };
+  snapshot?: Record<string, unknown>;
+  canvasHostUrl?: string;
   auth?: {
     deviceToken: string;
-    role: ClientRole;
+    role: string;
     scopes: string[];
+    issuedAtMs?: number;
+  };
+  policy: {
+    maxPayload: number;
+    maxBufferedBytes: number;
+    tickIntervalMs: number;
   };
 }
 

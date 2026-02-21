@@ -5,6 +5,8 @@ export type {
   ConnectionState,
   ConnectParams,
   ConnectChallenge,
+  AuthParams,
+  DeviceIdentity,
   HelloOk,
   ProtocolRequest,
   ProtocolResponse,

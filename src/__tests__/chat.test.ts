@@ -354,6 +354,52 @@ describe("Chat streaming", () => {
     }
   });
 
+  it("passes optional ChatOptions fields in request params", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const gen = client.chat("Hello", {
+      sessionKey: "sess-1",
+      agentId: "agent-1",
+      thinking: "medium",
+      deliver: false,
+      channel: "slack",
+      extraSystemPrompt: "Be concise.",
+      label: "test-label",
+      timeout: 30000,
+    });
+    const iterPromise = gen.next();
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.params.sessionKey).toBe("sess-1");
+    expect(sentMsg.params.agentId).toBe("agent-1");
+    expect(sentMsg.params.thinking).toBe("medium");
+    expect(sentMsg.params.deliver).toBe(false);
+    expect(sentMsg.params.channel).toBe("slack");
+    expect(sentMsg.params.extraSystemPrompt).toBe("Be concise.");
+    expect(sentMsg.params.label).toBe("test-label");
+    expect(sentMsg.params.timeout).toBe(30000);
+
+    // Clean up
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "accepted" },
+    });
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "ok", result: { payloads: [] } },
+    });
+
+    await iterPromise;
+    for await (const _ of gen) {
+      // consume
+    }
+  });
+
   it("omits attachments from params when not provided", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
@@ -383,6 +429,50 @@ describe("Chat streaming", () => {
     for await (const _ of gen) {
       // consume
     }
+  });
+
+  it("abort sends chat.abort request with sessionKey", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const abortPromise = client.chatAbort("sess-key-1");
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.type).toBe("req");
+    expect(sentMsg.method).toBe("chat.abort");
+    expect(sentMsg.params.sessionKey).toBe("sess-key-1");
+    expect(sentMsg.params.runId).toBeUndefined();
+
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { status: "ok" },
+    });
+
+    const result = await abortPromise;
+    expect(result).toEqual({ status: "ok" });
+  });
+
+  it("abort includes runId when provided", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const abortPromise = client.chatAbort("sess-key-1", "run-123");
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.method).toBe("chat.abort");
+    expect(sentMsg.params.sessionKey).toBe("sess-key-1");
+    expect(sentMsg.params.runId).toBe("run-123");
+
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { status: "ok" },
+    });
+
+    await abortPromise;
   });
 
   it("yields error chunk when response has ok: false", async () => {
