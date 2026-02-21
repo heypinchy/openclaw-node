@@ -42,12 +42,8 @@ function base64UrlEncode(buf: Buffer): string {
 export function generateDeviceIdentity(): DeviceIdentityData {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
 
-  const publicKeyPem = publicKey
-    .export({ type: "spki", format: "pem" })
-    .toString();
-  const privateKeyPem = privateKey
-    .export({ type: "pkcs8", format: "pem" })
-    .toString();
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 
   const raw = derivePublicKeyRaw(publicKeyPem);
   const deviceId = crypto.createHash("sha256").update(raw).digest("hex");
@@ -55,9 +51,7 @@ export function generateDeviceIdentity(): DeviceIdentityData {
   return { deviceId, publicKeyPem, privateKeyPem };
 }
 
-export function loadOrCreateDeviceIdentity(
-  filePath: string
-): DeviceIdentityData {
+export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentityData {
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, "utf8");

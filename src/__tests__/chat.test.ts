@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
-import {
-  installMockWebSocket,
-  getMockWs,
-  completeHandshake,
-} from "./helpers/mock-ws";
+import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Chat streaming", () => {
   let client: OpenClawClient;
@@ -226,7 +222,11 @@ describe("Chat streaming", () => {
       type: "res",
       id: requestId,
       ok: true,
-      payload: { runId: requestId, status: "ok", result: { payloads: [{ text: "The answer is 42." }] } },
+      payload: {
+        runId: requestId,
+        status: "ok",
+        result: { payloads: [{ text: "The answer is 42." }] },
+      },
     });
 
     const result = await resultPromise;
@@ -320,9 +320,7 @@ describe("Chat streaming", () => {
     const sentBefore = ws.sent.length;
 
     const gen = client.chat("What is in this image?", {
-      attachments: [
-        { mimeType: "image/png", content: "abc123base64data" },
-      ],
+      attachments: [{ mimeType: "image/png", content: "abc123base64data" }],
     });
     const iterPromise = gen.next();
 

@@ -2,11 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import {
-  generateDeviceIdentity,
-  loadOrCreateDeviceIdentity,
-  buildSignedDevice,
-} from "../device";
+import { generateDeviceIdentity, loadOrCreateDeviceIdentity, buildSignedDevice } from "../device";
 
 describe("Device Identity", () => {
   let tmpDir: string;
@@ -117,22 +113,16 @@ describe("Device Identity", () => {
       ].join("|");
 
       // Decode base64url signature
-      const sig = Buffer.from(
-        device.signature!.replace(/-/g, "+").replace(/_/g, "/"),
-        "base64"
-      );
+      const sig = Buffer.from(device.signature!.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 
       // Decode base64url public key to raw bytes
       const pubKeyRaw = Buffer.from(
         device.publicKey!.replace(/-/g, "+").replace(/_/g, "/"),
-        "base64"
+        "base64",
       );
 
       // Create SPKI-wrapped public key for Ed25519
-      const ED25519_SPKI_PREFIX = Buffer.from(
-        "302a300506032b6570032100",
-        "hex"
-      );
+      const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
       const key = crypto.createPublicKey({
         key: Buffer.concat([ED25519_SPKI_PREFIX, pubKeyRaw]),
         type: "spki",

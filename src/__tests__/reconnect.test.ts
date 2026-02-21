@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
-import {
-  installMockWebSocket,
-  getMockWs,
-  completeHandshake,
-} from "./helpers/mock-ws";
+import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Auto-reconnect with exponential backoff", () => {
   let client: OpenClawClient;
@@ -134,7 +130,7 @@ describe("Auto-reconnect with exponential backoff", () => {
     expect(errorHandler).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.stringContaining("Max reconnect"),
-      })
+      }),
     );
   });
 

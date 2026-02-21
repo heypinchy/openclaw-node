@@ -26,11 +26,7 @@ describe("Protocol types", () => {
 
     it("has the correct type shape", () => {
       expectTypeOf<ConnectionState>().toEqualTypeOf<
-        | "disconnected"
-        | "connecting"
-        | "challenging"
-        | "authenticating"
-        | "connected"
+        "disconnected" | "connecting" | "challenging" | "authenticating" | "connected"
       >();
     });
   });

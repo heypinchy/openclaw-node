@@ -9,11 +9,7 @@ import {
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
-import {
-  loadOrCreateDeviceIdentity,
-  buildSignedDevice,
-  type DeviceIdentityData,
-} from "./device";
+import { loadOrCreateDeviceIdentity, buildSignedDevice, type DeviceIdentityData } from "./device";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
@@ -25,7 +21,7 @@ const getWebSocket = (): typeof WebSocket => {
     return require("ws");
   } catch {
     throw new Error(
-      "No WebSocket implementation found. Use Node.js 22+ or install the `ws` package."
+      "No WebSocket implementation found. Use Node.js 22+ or install the `ws` package.",
     );
   }
 };
@@ -119,13 +115,13 @@ export class OpenClawClient extends EventEmitter {
       process.emitWarning(
         "Connecting with authentication token over insecure ws:// transport. " +
           "Use wss:// in production to prevent token interception.",
-        "InsecureTransportWarning"
+        "InsecureTransportWarning",
       );
     }
 
     this.deviceIdentity = loadOrCreateDeviceIdentity(
       this.options.deviceIdentityPath ||
-        `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`
+        `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`,
     );
   }
 
@@ -154,15 +150,13 @@ export class OpenClawClient extends EventEmitter {
 
       const onMessage = (event: MessageEvent | { data: string }) => {
         const data =
-          typeof event === "object" && "data" in event
-            ? String(event.data)
-            : String(event);
+          typeof event === "object" && "data" in event ? String(event.data) : String(event);
         if (data.length > this.options.maxMessageSize) {
           this.emit(
             "error",
             new Error(
-              `Message size ${data.length} exceeds limit of ${this.options.maxMessageSize} bytes`
-            )
+              `Message size ${data.length} exceeds limit of ${this.options.maxMessageSize} bytes`,
+            ),
           );
           return;
         }
@@ -172,8 +166,8 @@ export class OpenClawClient extends EventEmitter {
             this.emit(
               "error",
               new Error(
-                `Invalid protocol message: unexpected type "${(parsed as Record<string, unknown>)?.type}"`
-              )
+                `Invalid protocol message: unexpected type "${(parsed as Record<string, unknown>)?.type}"`,
+              ),
             );
             return;
           }
@@ -236,7 +230,9 @@ export class OpenClawClient extends EventEmitter {
         ...(options?.thinking !== undefined && { thinking: options.thinking }),
         ...(options?.deliver !== undefined && { deliver: options.deliver }),
         ...(options?.channel !== undefined && { channel: options.channel }),
-        ...(options?.extraSystemPrompt !== undefined && { extraSystemPrompt: options.extraSystemPrompt }),
+        ...(options?.extraSystemPrompt !== undefined && {
+          extraSystemPrompt: options.extraSystemPrompt,
+        }),
         ...(options?.label !== undefined && { label: options.label }),
         ...(options?.timeout !== undefined && { timeout: options.timeout }),
         idempotencyKey: id,
@@ -279,14 +275,9 @@ export class OpenClawClient extends EventEmitter {
           }
         }
       }
-      if (
-        msg.type === "res" &&
-        (msg as ProtocolResponse).id === id
-      ) {
+      if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
         const res = msg as ProtocolResponse;
-        const payload = res.payload as
-          | Record<string, unknown>
-          | undefined;
+        const payload = res.payload as Record<string, unknown> | undefined;
         // Ignore "accepted" responses; only terminate on final "ok" response
         if (payload?.status === "accepted") {
           return;
@@ -339,7 +330,10 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Abort a running chat in the given session.
    */
-  async chatAbort(sessionKey: string, runId?: string): Promise<Record<string, unknown> | undefined> {
+  async chatAbort(
+    sessionKey: string,
+    runId?: string,
+  ): Promise<Record<string, unknown> | undefined> {
     // Terminate the local generator immediately so it doesn't hang
     this._activeChats.get(sessionKey)?.();
 
@@ -424,10 +418,7 @@ export class OpenClawClient extends EventEmitter {
   /**
    * Send a raw protocol request and wait for the response.
    */
-  async request(
-    method: string,
-    params: Record<string, unknown> = {}
-  ): Promise<ProtocolResponse> {
+  async request(method: string, params: Record<string, unknown> = {}): Promise<ProtocolResponse> {
     const id = this.generateId();
 
     return new Promise<ProtocolResponse>((resolve, reject) => {
@@ -453,10 +444,7 @@ export class OpenClawClient extends EventEmitter {
 
   // --- Internal ---
 
-  private handleMessage(
-    msg: ProtocolMessage,
-    connectResolve?: (value: HelloOk) => void
-  ): void {
+  private handleMessage(msg: ProtocolMessage, connectResolve?: (value: HelloOk) => void): void {
     this.emit("_raw", msg);
 
     if (msg.type === "event") {
@@ -493,9 +481,7 @@ export class OpenClawClient extends EventEmitter {
         if (res.ok) {
           pending.resolve(res);
         } else {
-          pending.reject(
-            new Error(res.error?.message || `Request failed: ${res.id}`)
-          );
+          pending.reject(new Error(res.error?.message || `Request failed: ${res.id}`));
         }
       }
 
@@ -570,7 +556,7 @@ export class OpenClawClient extends EventEmitter {
 
     const delay = Math.min(
       this.options.reconnectIntervalMs * Math.pow(2, this.reconnectAttempts),
-      30000
+      30000,
     );
     this.reconnectAttempts++;
 

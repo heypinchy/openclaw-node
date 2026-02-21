@@ -66,7 +66,7 @@ export function installMockWebSocket() {
         super();
         setMockWs(this);
       }
-    }
+    },
   );
 }
 
@@ -74,9 +74,9 @@ function setMockWs(ws: MockWebSocket) {
   _mockWs = ws;
 }
 
-export async function completeHandshake(
-  client: { connect: () => Promise<unknown> }
-): Promise<void> {
+export async function completeHandshake(client: {
+  connect: () => Promise<unknown>;
+}): Promise<void> {
   const connectPromise = client.connect();
   const ws = getMockWs();
   ws.simulateOpen();

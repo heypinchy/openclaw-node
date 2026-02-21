@@ -59,10 +59,9 @@ describe.skipIf(!shouldRun)("Integration: OpenClaw Gateway", () => {
     testSessions.push(sessionKey);
 
     const chunks: ChatChunk[] = [];
-    for await (const chunk of client.chat(
-      "Say just the word hello and nothing else",
-      { sessionKey },
-    )) {
+    for await (const chunk of client.chat("Say just the word hello and nothing else", {
+      sessionKey,
+    })) {
       chunks.push(chunk);
     }
 
@@ -80,10 +79,7 @@ describe.skipIf(!shouldRun)("Integration: OpenClaw Gateway", () => {
     const sessionKey = "integration-test-sync";
     testSessions.push(sessionKey);
 
-    const result = await client.chatSync(
-      "Say just the word hi and nothing else",
-      { sessionKey },
-    );
+    const result = await client.chatSync("Say just the word hi and nothing else", { sessionKey });
 
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);

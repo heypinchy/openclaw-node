@@ -40,6 +40,9 @@ jobs:
         if: matrix.strip-ws
         run: rm -rf node_modules/ws
 
+      - name: Formatting
+        run: pnpm format:check
+
       - name: Lint
         run: pnpm lint
 
@@ -48,6 +51,10 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Test with coverage
+        if: matrix.node-version == 22 && !matrix.strip-ws
+        run: npx vitest run --coverage
 
       - name: Build
         run: pnpm build
@@ -69,6 +76,17 @@ jobs:
             exit 1
           fi
 
+      - name: Check package size
+        if: matrix.node-version == 22 && !matrix.strip-ws
+        run: |
+          SIZE=$(wc -c < openclaw-node-*.tgz | tr -d ' ')
+          echo "Package size: ${SIZE} bytes"
+          MAX_SIZE=51200  # 50 kB
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "ERROR: Package size ${SIZE} bytes exceeds limit of ${MAX_SIZE} bytes (50 kB)"
+            exit 1
+          fi
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest
@@ -87,3 +105,27 @@ jobs:
 
       - name: Audit production dependencies
         run: pnpm audit --prod
+
+      - name: Check dependency licenses
+        run: |
+          # List all production dependency licenses and fail on copyleft/proprietary
+          LICENSES=$(pnpm licenses list --prod --json 2>/dev/null || echo "[]")
+          FORBIDDEN='GPL|AGPL|SSPL|EUPL|OSL|CPAL|CPL|Sleepycat|Watcom'
+          VIOLATIONS=$(echo "$LICENSES" | node -e "
+            const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const forbidden = new RegExp('$FORBIDDEN', 'i');
+            const violations = [];
+            for (const [license, pkgs] of Object.entries(data)) {
+              if (forbidden.test(license)) {
+                for (const pkg of pkgs) {
+                  violations.push(pkg.name + '@' + pkg.version + ' (' + license + ')');
+                }
+              }
+            }
+            if (violations.length) {
+              console.log('INCOMPATIBLE LICENSES FOUND:');
+              violations.forEach(v => console.log('  - ' + v));
+              process.exit(1);
+            }
+            console.log('All production dependency licenses are MIT-compatible.');
+          ")

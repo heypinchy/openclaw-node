@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
-import {
-  installMockWebSocket,
-  getMockWs,
-  completeHandshake,
-} from "./helpers/mock-ws";
+import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Health check", () => {
   let client: OpenClawClient;
