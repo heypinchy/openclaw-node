@@ -18,8 +18,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "build": "tsup src/index.ts --format cjs,esm --dts --external ws",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch --external ws",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -60,7 +60,7 @@
   },
   "packageManager": "pnpm@10.29.3",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
