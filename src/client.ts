@@ -274,6 +274,29 @@ export class OpenClawClient extends EventEmitter {
             resolveChunk?.();
           }
         }
+
+        if (
+          event.event === "agent" &&
+          event.payload &&
+          (event.payload as Record<string, unknown>).runId === id &&
+          (event.payload as Record<string, unknown>).stream === "tool"
+        ) {
+          const data = (event.payload as Record<string, unknown>).data as
+            | Record<string, unknown>
+            | undefined;
+          const phase = data?.phase as string | undefined;
+          const toolName = (data?.tool as string) ?? "unknown";
+
+          if (phase === "start") {
+            chunks.push({ type: "tool_use", text: toolName });
+            resolveChunk?.();
+          } else if (phase === "end") {
+            const output = data?.output;
+            const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
+            chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+            resolveChunk?.();
+          }
+        }
       }
       if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
         const res = msg as ProtocolResponse;

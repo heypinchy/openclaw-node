@@ -566,4 +566,129 @@ describe("Chat streaming", () => {
     expect(errorChunk).toBeDefined();
     expect(errorChunk!.text).toBe("AI service temporarily overloaded");
   });
+
+  it("yields tool_use chunk when agent uses a tool", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Search for cats");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Gateway sends tool execution start event
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "start", tool: "search_web", input: { query: "cats" } },
+      },
+    });
+
+    // Gateway sends tool execution end event
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "search_web", output: "Found 10 results" },
+      },
+    });
+
+    // Assistant responds with text
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "assistant", data: { text: "Here are the results." } },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const toolUse = chunks.find((c) => c.type === "tool_use");
+    expect(toolUse).toBeDefined();
+    expect(toolUse!.text).toBe("search_web");
+
+    const toolResult = chunks.find((c) => c.type === "tool_result");
+    expect(toolResult).toBeDefined();
+    expect(toolResult!.text).toContain("search_web");
+
+    const textChunks = chunks.filter((c) => c.type === "text");
+    expect(textChunks.length).toBeGreaterThan(0);
+  });
+
+  it("ignores tool events from unrelated runs", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Tool event from a different run — should be ignored
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: "other-run",
+        stream: "tool",
+        data: { phase: "start", tool: "dangerous_tool", input: {} },
+      },
+    });
+
+    // Finish our run
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const toolChunks = chunks.filter((c) => c.type === "tool_use" || c.type === "tool_result");
+    expect(toolChunks).toHaveLength(0);
+  });
 });
