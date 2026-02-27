@@ -30,7 +30,7 @@ The gateway runs on `ws://localhost:18789` by default. If you've set an auth tok
 npm install openclaw-node
 ```
 
-> **Node.js 22+** works out of the box (built-in WebSocket). For Node.js 18–21, also install `ws`:
+> **Node.js 22+** works out of the box (built-in WebSocket). For Node.js 20–21, also install `ws`:
 > ```bash
 > npm install openclaw-node ws
 > ```
@@ -116,6 +116,12 @@ for await (const chunk of stream) {
   switch (chunk.type) {
     case "text":
       process.stdout.write(chunk.text);  // Partial response text
+      break;
+    case "tool_use":
+      console.log(`\n🔧 Using tool: ${chunk.text}`);
+      break;
+    case "tool_result":
+      console.log(`✅ Tool result: ${chunk.text}`);
       break;
     case "done":
       console.log("\n--- Response complete ---");
@@ -213,15 +219,17 @@ rl.on("line", async (input) => {
 
 ## Compatibility
 
-| openclaw-node | Gateway Protocol | OpenClaw Gateway |
-|---------------|-----------------|------------------|
-| 0.1.x         | v3              | 0.x (current)    |
+| openclaw-node | Gateway Protocol | OpenClaw Gateway | What's new                   |
+|---------------|-----------------|------------------|------------------------------|
+| 0.2.x         | v3              | 0.x (current)    | Tool event streaming         |
+| 0.1.x         | v3              | 0.x              | Initial release              |
 
 If the OpenClaw Gateway bumps its protocol version, you'll need a matching openclaw-node release. Check this table to find the right version.
 
 ## Features
 
 - **Streaming** — AsyncIterator-based, get responses token by token
+- **Tool events** — See which tools agents use and what they return (`tool_use` / `tool_result` chunks)
 - **Auto-reconnect** — Exponential backoff, configurable retries
 - **TypeScript-first** — Full type definitions for all protocol messages
 - **Zero config** — Handles the full WebSocket protocol (handshake, auth, keepalive) for you

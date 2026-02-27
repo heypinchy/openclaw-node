@@ -526,7 +526,7 @@ export class OpenClawClient extends EventEmitter {
       maxProtocol: PROTOCOL_VERSION,
       client: {
         id: clientId,
-        version: this.options.clientVersion || "0.2.0",
+        version: this.options.clientVersion || "0.2.1",
         platform: process.platform,
         mode: "backend",
       },
@@ -539,7 +539,7 @@ export class OpenClawClient extends EventEmitter {
         token: this.options.token,
       },
       locale: Intl.DateTimeFormat().resolvedOptions().locale || "en-US",
-      userAgent: `openclaw-node/0.2.0`,
+      userAgent: `openclaw-node/0.2.1`,
       ...(device && { device }),
     };
 
