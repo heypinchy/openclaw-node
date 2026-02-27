@@ -260,41 +260,33 @@ export class OpenClawClient extends EventEmitter {
         if (
           event.event === "agent" &&
           event.payload &&
-          (event.payload as Record<string, unknown>).runId === id &&
-          (event.payload as Record<string, unknown>).stream === "assistant"
+          (event.payload as Record<string, unknown>).runId === id
         ) {
-          const data = (event.payload as Record<string, unknown>).data as
-            | Record<string, unknown>
-            | undefined;
-          const text = data?.text as string | undefined;
-          if (text && text.length > cumulativeLength) {
-            const newText = text.slice(cumulativeLength);
-            cumulativeLength = text.length;
-            chunks.push({ type: "text", text: newText });
-            resolveChunk?.();
-          }
-        }
+          const payload = event.payload as Record<string, unknown>;
+          const stream = payload.stream as string | undefined;
+          const data = payload.data as Record<string, unknown> | undefined;
 
-        if (
-          event.event === "agent" &&
-          event.payload &&
-          (event.payload as Record<string, unknown>).runId === id &&
-          (event.payload as Record<string, unknown>).stream === "tool"
-        ) {
-          const data = (event.payload as Record<string, unknown>).data as
-            | Record<string, unknown>
-            | undefined;
-          const phase = data?.phase as string | undefined;
-          const toolName = (data?.tool as string) ?? "unknown";
+          if (stream === "assistant") {
+            const text = data?.text as string | undefined;
+            if (text && text.length > cumulativeLength) {
+              const newText = text.slice(cumulativeLength);
+              cumulativeLength = text.length;
+              chunks.push({ type: "text", text: newText });
+              resolveChunk?.();
+            }
+          } else if (stream === "tool") {
+            const phase = data?.phase as string | undefined;
+            const toolName = (data?.tool as string) ?? "unknown";
 
-          if (phase === "start") {
-            chunks.push({ type: "tool_use", text: toolName });
-            resolveChunk?.();
-          } else if (phase === "end") {
-            const output = data?.output;
-            const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
-            chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
-            resolveChunk?.();
+            if (phase === "start") {
+              chunks.push({ type: "tool_use", text: toolName });
+              resolveChunk?.();
+            } else if (phase === "end") {
+              const output = data?.output;
+              const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
+              chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+              resolveChunk?.();
+            }
           }
         }
       }

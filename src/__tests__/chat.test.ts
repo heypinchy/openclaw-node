@@ -636,7 +636,7 @@ describe("Chat streaming", () => {
 
     const toolResult = chunks.find((c) => c.type === "tool_result");
     expect(toolResult).toBeDefined();
-    expect(toolResult!.text).toContain("search_web");
+    expect(toolResult!.text).toBe("search_web: Found 10 results");
 
     const textChunks = chunks.filter((c) => c.type === "text");
     expect(textChunks.length).toBeGreaterThan(0);
