@@ -18,9 +18,10 @@ jobs:
           COMMIT_SHA="${{ github.sha }}"
           echo "Checking CI check runs for commit $COMMIT_SHA ..."
 
-          # GitHub Actions uses the Checks API, not the Status API
+          # GitHub Actions uses the Checks API, not the Status API.
+          # Exclude this workflow's own check runs to avoid self-referential failure.
           CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" \
-            --jq '.check_runs[] | select(.app.slug == "github-actions") | {name, status, conclusion}')
+            --jq '.check_runs[] | select(.app.slug == "github-actions" and .name != "Verify CI passed" and .name != "Build & Publish") | {name, status, conclusion}')
 
           echo "Check runs:"
           echo "$CHECKS" | jq -r '"\(.name): \(.status) / \(.conclusion)"'
