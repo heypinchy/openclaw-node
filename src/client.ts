@@ -97,6 +97,7 @@ export class OpenClawClient extends EventEmitter {
   private reconnectAttempts = 0;
   private _isConnected = false;
   private _shouldReconnect = true;
+  private _availableMethods: string[] = [];
   private deviceIdentity: DeviceIdentityData | null = null;
 
   constructor(options: OpenClawClientOptions) {
@@ -127,6 +128,16 @@ export class OpenClawClient extends EventEmitter {
 
   get isConnected(): boolean {
     return this._isConnected;
+  }
+
+  /** RPC methods advertised by the Gateway in the hello-ok handshake. */
+  get availableMethods(): string[] {
+    return this._availableMethods;
+  }
+
+  /** Check whether a specific RPC method is available on the connected Gateway. */
+  hasMethod(method: string): boolean {
+    return this._availableMethods.includes(method);
   }
 
   /**
@@ -431,6 +442,77 @@ export class OpenClawClient extends EventEmitter {
   };
 
   /**
+   * Configuration management helpers.
+   *
+   * - `get()` — fetch the current config and its hash
+   * - `patch(raw, baseHash)` — apply a JSON merge patch (objects merge, `null` deletes, arrays replace)
+   * - `apply(raw)` — replace the full config
+   *
+   * Both `patch` and `apply` support optimistic locking via `baseHash`.
+   */
+  readonly config = {
+    get: async () => {
+      const res = await this.request("config.get", {});
+      return res.payload as Record<string, unknown>;
+    },
+    patch: async (
+      raw: string,
+      baseHash: string,
+      options?: { sessionKey?: string; note?: string; restartDelayMs?: number },
+    ) => {
+      const res = await this.request("config.patch", {
+        raw,
+        baseHash,
+        ...options,
+      });
+      return res.payload;
+    },
+    apply: async (
+      raw: string,
+      baseHash?: string,
+      options?: { sessionKey?: string; note?: string; restartDelayMs?: number },
+    ) => {
+      const res = await this.request("config.apply", {
+        raw,
+        ...(baseHash && { baseHash }),
+        ...options,
+      });
+      return res.payload;
+    },
+  };
+
+  /**
+   * Channel status helpers.
+   */
+  readonly channels = {
+    status: async (): Promise<Record<string, unknown> | undefined> => {
+      const res = await this.request("channels.status", {});
+      return res.payload;
+    },
+  };
+
+  /**
+   * Channel pairing helpers.
+   *
+   * Note: These RPC method names are inferred from the CLI behavior.
+   * If the Gateway doesn't expose them, use hasMethod() to check availability
+   * before calling, and fall back to CLI calls if needed.
+   */
+  readonly pairing = {
+    list: async (channel: string): Promise<Record<string, unknown> | undefined> => {
+      const res = await this.request("pairing.list", { channel });
+      return res.payload;
+    },
+    approve: async (
+      channel: string,
+      code: string,
+    ): Promise<Record<string, unknown> | undefined> => {
+      const res = await this.request("pairing.approve", { channel, code });
+      return res.payload;
+    },
+  };
+
+  /**
    * Send a raw protocol request and wait for the response.
    */
   async request(method: string, params: Record<string, unknown> = {}): Promise<ProtocolResponse> {
@@ -484,6 +566,7 @@ export class OpenClawClient extends EventEmitter {
         this._isConnected = true;
         this.reconnectAttempts = 0;
         const helloOk = res.payload as unknown as HelloOk;
+        this._availableMethods = helloOk.features?.methods ?? [];
         this.emit("connected", helloOk);
         connectResolve?.(helloOk);
         return;
