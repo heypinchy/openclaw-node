@@ -154,6 +154,56 @@ const history = await client.sessions.history("session-key-here", {
 await client.sessions.send("session-key-here", "Follow up on yesterday's task");
 ```
 
+### Configuration
+
+Read and update the Gateway configuration at runtime without restarting.
+
+```typescript
+// Get the current config and its hash (for optimistic locking)
+const result = await client.config.get();
+console.log(result.config); // full config object
+console.log(result.hash);   // use this as baseHash for patch/apply
+
+// Patch config (JSON merge patch: objects merge, null deletes, arrays replace)
+await client.config.patch(
+  JSON.stringify({ channels: { telegram: { enabled: true } } }),
+  result.hash,
+  { note: "Enable Telegram channel" },
+);
+
+// Replace the full config
+await client.config.apply(JSON.stringify(fullConfig), result.hash);
+```
+
+Both `patch` and `apply` accept optional parameters:
+- `sessionKey` — associate the change with a session
+- `note` — human-readable description of the change
+- `restartDelayMs` — delay before the Gateway restarts affected services
+
+### Channels
+
+Check the status of configured channels (Telegram, Slack, WhatsApp, etc.):
+
+```typescript
+const status = await client.channels.status();
+console.log(status);
+// { telegram: { connected: true }, slack: { connected: false } }
+```
+
+### Pairing
+
+Manage channel pairing requests (e.g., approve Telegram users who want to link their account):
+
+```typescript
+// List pending pairing requests for a channel
+const pending = await client.pairing.list("telegram");
+
+// Approve a pairing request
+await client.pairing.approve("telegram", "ABC123");
+```
+
+> **Note:** Pairing RPC methods are inferred from CLI behavior and may not be available on all Gateway versions. Use `client.request()` with error handling, or check availability before calling.
+
 ### Events
 
 ```typescript

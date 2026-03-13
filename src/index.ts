@@ -15,4 +15,5 @@ export type {
   ClientRole,
   ClientEventMap,
   ChatAttachment,
+  ConfigGetResult,
 } from "./types";

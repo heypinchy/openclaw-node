@@ -180,6 +180,13 @@ export interface SessionMessage {
   timestamp?: string;
 }
 
+// --- Config ---
+
+export interface ConfigGetResult {
+  config: Record<string, unknown>;
+  hash: string;
+}
+
 // --- Client Events ---
 
 export type ClientEventMap = {
