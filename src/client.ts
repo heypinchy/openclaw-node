@@ -609,7 +609,7 @@ export class OpenClawClient extends EventEmitter {
       maxProtocol: PROTOCOL_VERSION,
       client: {
         id: clientId,
-        version: this.options.clientVersion || "0.2.1",
+        version: this.options.clientVersion || "0.3.0",
         platform: process.platform,
         mode: "backend",
       },
