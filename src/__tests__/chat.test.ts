@@ -741,7 +741,11 @@ describe("Chat streaming", () => {
     ws.simulateMessage({
       type: "event",
       event: "agent",
-      payload: { runId: requestId, stream: "tool", data: { phase: "end", tool: "docs_read", output: "..." } },
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "docs_read", output: "..." },
+      },
     });
 
     // Turn 2 — finale answer, length-wise SHORTER at first than turn 1's
@@ -782,18 +786,18 @@ describe("Chat streaming", () => {
 
     // The full text from BOTH turns must be present — none of turn 2 may be
     // silently truncated by a leftover watermark.
-    expect(concatenatedText).toContain("Ich werde die Dokumentation zu Knowledge Base Agents konsultieren.");
+    expect(concatenatedText).toContain(
+      "Ich werde die Dokumentation zu Knowledge Base Agents konsultieren.",
+    );
     expect(concatenatedText).toContain("Guten Tag! Hier ist eine umfassende Erklärung.");
 
     // The cumulative-length fallback path must also emit a boundary 'done'
     // so downstream consumers can split the two turns into separate
     // assistant messages (parity with the preferred `delta` path).
     const turn1Text = chunks.findIndex(
-      (c) => c.type === "text" && c.text.includes("Knowledge Base Agents konsultieren")
+      (c) => c.type === "text" && c.text.includes("Knowledge Base Agents konsultieren"),
     );
-    const turn2Text = chunks.findIndex(
-      (c) => c.type === "text" && c.text.includes("Guten Tag")
-    );
+    const turn2Text = chunks.findIndex((c) => c.type === "text" && c.text.includes("Guten Tag"));
     expect(turn1Text).toBeGreaterThanOrEqual(0);
     expect(turn2Text).toBeGreaterThan(turn1Text);
     const between = chunks.slice(turn1Text + 1, turn2Text);
@@ -987,7 +991,11 @@ describe("Chat streaming", () => {
     ws.simulateMessage({
       type: "event",
       event: "agent",
-      payload: { runId: requestId, stream: "tool", data: { phase: "end", tool: "lookup", output: "x" } },
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "lookup", output: "x" },
+      },
     });
 
     // Turn 2 streamed token-by-token via delta (text restarts at 0 on
