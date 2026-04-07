@@ -278,12 +278,42 @@ export class OpenClawClient extends EventEmitter {
           const data = payload.data as Record<string, unknown> | undefined;
 
           if (stream === "assistant") {
+            const delta = data?.delta as string | undefined;
             const text = data?.text as string | undefined;
-            if (text && text.length > cumulativeLength) {
-              const newText = text.slice(cumulativeLength);
-              cumulativeLength = text.length;
-              chunks.push({ type: "text", text: newText });
-              resolveChunk?.();
+            if (typeof delta === "string") {
+              // Preferred path: OpenClaw emits the just-added slice in
+              // `delta`. Use it directly — unambiguous across turns.
+              if (delta.length > 0) {
+                // Turn-boundary detection: OpenClaw's visibleTextAccumulator
+                // restarts at 0 for each new assistant turn (e.g. after a
+                // tool round-trip). The first event of a new turn therefore
+                // has delta === text. We only treat that as a boundary if
+                // we've already seen content from a previous turn
+                // (cumulativeLength > 0), otherwise the very first chunk
+                // of the whole stream would be flagged as a boundary too.
+                if (delta === text && cumulativeLength > 0) {
+                  chunks.push({ type: "done", text: "" });
+                }
+                cumulativeLength = (text ?? "").length;
+                chunks.push({ type: "text", text: delta });
+                resolveChunk?.();
+              }
+            } else if (text !== undefined) {
+              // Backwards-compat path for OpenClaw releases that only emit
+              // `text` (cumulative within a turn). A new turn restarts the
+              // counter at 0 — when we see the length drop below our
+              // watermark, treat that as a turn boundary (this path is
+              // relevant when no tool event sat between the two turns).
+              if (text.length < cumulativeLength) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
+              if (text.length > cumulativeLength) {
+                const newText = text.slice(cumulativeLength);
+                cumulativeLength = text.length;
+                chunks.push({ type: "text", text: newText });
+                resolveChunk?.();
+              }
             }
           } else if (stream === "tool") {
             const phase = data?.phase as string | undefined;
@@ -296,6 +326,16 @@ export class OpenClawClient extends EventEmitter {
               const output = data?.output;
               const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
               chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+              // A completed tool call ends the current assistant turn. Only
+              // emit the turn-boundary marker if we've actually seen
+              // assistant text in this turn (cumulativeLength > 0) — back-
+              // to-back tool calls without intervening text should not
+              // produce spurious boundaries. Then reset the watermark so
+              // the legacy `text`-only path correctly tracks the next turn.
+              if (cumulativeLength > 0) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
               resolveChunk?.();
             }
           }
