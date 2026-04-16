@@ -9,7 +9,13 @@ import {
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
-import { loadOrCreateDeviceIdentity, buildSignedDevice, type DeviceIdentityData } from "./device";
+import {
+  loadOrCreateDeviceIdentity,
+  buildSignedDevice,
+  saveDeviceToken,
+  clearDeviceToken,
+  type DeviceIdentityData,
+} from "./device";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
@@ -99,6 +105,17 @@ export class OpenClawClient extends EventEmitter {
   private _shouldReconnect = true;
   private _availableMethods: string[] = [];
   private deviceIdentity: DeviceIdentityData | null = null;
+  private deviceIdentityPath: string | null = null;
+  /**
+   * Per-connect-attempt bookkeeping. Reset on every connect() call. Lets
+   * us tell "connection closed before authentication completed while we
+   * were using the persisted deviceToken" apart from a network blip after
+   * a successful handshake.
+   */
+  private currentAttempt: {
+    usedPersistedToken: boolean;
+    reachedHelloOk: boolean;
+  } | null = null;
 
   constructor(options: OpenClawClientOptions) {
     super();
@@ -120,10 +137,44 @@ export class OpenClawClient extends EventEmitter {
       );
     }
 
-    this.deviceIdentity = loadOrCreateDeviceIdentity(
+    this.deviceIdentityPath =
       this.options.deviceIdentityPath ||
-        `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`,
-    );
+      `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`;
+    this.deviceIdentity = loadOrCreateDeviceIdentity(this.deviceIdentityPath);
+  }
+
+  private persistDeviceTokenIfChanged(deviceToken: string | undefined): void {
+    if (!deviceToken || !this.deviceIdentityPath) return;
+    if (this.deviceIdentity?.deviceToken === deviceToken) return;
+    try {
+      saveDeviceToken(this.deviceIdentityPath, deviceToken);
+      if (this.deviceIdentity) this.deviceIdentity.deviceToken = deviceToken;
+    } catch (err) {
+      this.emit("error", err instanceof Error ? err : new Error("Failed to persist deviceToken"));
+    }
+  }
+
+  /**
+   * Called when the WebSocket closes or errors before a hello-ok arrives.
+   * If we were using the persisted deviceToken, the gateway has effectively
+   * rejected it — clear it so the next reconnect attempt falls back to the
+   * bootstrap token (which triggers a re-pair and a fresh deviceToken).
+   */
+  private handleConnectFailure(rejectConnectPromise?: (err: Error) => void): void {
+    const attempt = this.currentAttempt;
+    if (!attempt) return;
+    if (!attempt.reachedHelloOk && attempt.usedPersistedToken && this.deviceIdentityPath) {
+      try {
+        clearDeviceToken(this.deviceIdentityPath);
+      } catch {
+        // Best-effort: next attempt will just retry with the same (stale) token.
+      }
+      if (this.deviceIdentity) this.deviceIdentity.deviceToken = undefined;
+    }
+    if (!attempt.reachedHelloOk && rejectConnectPromise) {
+      rejectConnectPromise(new Error("WebSocket closed before handshake completed"));
+    }
+    this.currentAttempt = null;
   }
 
   get isConnected(): boolean {
@@ -145,6 +196,7 @@ export class OpenClawClient extends EventEmitter {
    */
   async connect(): Promise<HelloOk> {
     this._shouldReconnect = true;
+    this.currentAttempt = { usedPersistedToken: false, reachedHelloOk: false };
     const WS = getWebSocket();
 
     return new Promise<HelloOk>((resolve, reject) => {
@@ -195,12 +247,14 @@ export class OpenClawClient extends EventEmitter {
         // Node.js built-in WebSocket does not fire "close" after connection error,
         // so trigger reconnect directly from the error handler as well.
         this._isConnected = false;
+        this.handleConnectFailure();
         this.maybeReconnect();
       };
 
       const onClose = () => {
         this._isConnected = false;
         this.emit("disconnected", { reason: "closed" });
+        this.handleConnectFailure(reject);
         this.maybeReconnect();
       };
 
@@ -605,8 +659,10 @@ export class OpenClawClient extends EventEmitter {
       if (res.ok && res.payload && (res.payload as unknown as HelloOk).type === "hello-ok") {
         this._isConnected = true;
         this.reconnectAttempts = 0;
+        if (this.currentAttempt) this.currentAttempt.reachedHelloOk = true;
         const helloOk = res.payload as unknown as HelloOk;
         this._availableMethods = helloOk.features?.methods ?? [];
+        this.persistDeviceTokenIfChanged(helloOk.auth?.deviceToken);
         this.emit("connected", helloOk);
         connectResolve?.(helloOk);
         return;
@@ -632,6 +688,15 @@ export class OpenClawClient extends EventEmitter {
     const role = this.options.role || "operator";
     const scopes = this.options.scopes || DEFAULT_SCOPES;
 
+    // Prefer the persisted per-device token (issued by the Gateway on a
+    // previous successful connect) over the bootstrap token. The Gateway
+    // rejects the bootstrap token for already-paired devices.
+    const persistedToken = this.deviceIdentity?.deviceToken;
+    const connectToken = persistedToken || this.options.token;
+    if (this.currentAttempt) {
+      this.currentAttempt.usedPersistedToken = Boolean(persistedToken);
+    }
+
     const device = this.deviceIdentity
       ? buildSignedDevice({
           identity: this.deviceIdentity,
@@ -640,7 +705,7 @@ export class OpenClawClient extends EventEmitter {
           clientMode: "backend",
           role,
           scopes,
-          token: this.options.token,
+          token: connectToken,
         })
       : undefined;
 
@@ -659,7 +724,7 @@ export class OpenClawClient extends EventEmitter {
       commands: [],
       permissions: {},
       auth: {
-        token: this.options.token,
+        token: connectToken,
       },
       locale: Intl.DateTimeFormat().resolvedOptions().locale || "en-US",
       userAgent: `openclaw-node/0.2.1`,
