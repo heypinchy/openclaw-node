@@ -67,13 +67,7 @@ export interface ChatOptions {
   extraSystemPrompt?: string;
   label?: string;
   timeout?: number;
-  /**
-   * Optional client-generated message ID (e.g. a UUID from the browser).
-   * When provided, the chat generator will yield a `userMessagePersisted`
-   * chunk (before the first assistant chunk) once the Gateway acknowledges
-   * receipt of the user message. Callers can use this to transition a
-   * message from "sending" to "sent" state.
-   */
+  // when provided, yields a userMessagePersisted chunk once the Gateway acknowledges receipt
   clientMessageId?: string;
 }
 
@@ -85,7 +79,6 @@ export type ChatChunk =
   | { type: "error"; text: string }
   | {
       type: "userMessagePersisted";
-      text: string;
       clientMessageId: string;
       sessionKey: string | undefined;
       persistedAt: number;
@@ -422,7 +415,6 @@ export class OpenClawClient extends EventEmitter {
           if (options?.clientMessageId) {
             chunks.push({
               type: "userMessagePersisted",
-              text: "",
               clientMessageId: options.clientMessageId,
               sessionKey: options.sessionKey,
               persistedAt: Date.now(),

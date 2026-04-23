@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { OpenClawClient } from "../client";
+import { OpenClawClient, type ChatChunk } from "../client";
 import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Chat streaming", () => {
@@ -478,7 +478,7 @@ describe("Chat streaming", () => {
     const sentBefore = ws.sent.length;
 
     const sessionKey = "abort-test-session";
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     let generatorDone = false;
 
     const gen = client.chat("Tell me a long story", { sessionKey });
@@ -538,7 +538,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hello");
 
     const consumePromise = (async () => {
@@ -571,7 +571,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Search for cats");
 
     const consumePromise = (async () => {
@@ -646,7 +646,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hello");
 
     const consumePromise = (async () => {
@@ -700,7 +700,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Tell me something with tools");
 
     const consumePromise = (async () => {
@@ -814,7 +814,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Tell me about X");
 
     const consumePromise = (async () => {
@@ -871,8 +871,8 @@ describe("Chat streaming", () => {
     // Expected sequence: text(turn1), done(between), text(turn2), done(final)
     const seq = chunks.map((c) => c.type);
     expect(seq).toEqual(["text", "done", "text", "done"]);
-    expect(chunks[0].text).toBe("Let me look that up.");
-    expect(chunks[2].text).toBe("Here is the answer.");
+    expect(chunks[0].type === "text" && chunks[0].text).toBe("Let me look that up.");
+    expect(chunks[2].type === "text" && chunks[2].text).toBe("Here is the answer.");
   });
 
   it("does not emit a spurious 'done' between the first token and subsequent tokens of the same turn", async () => {
@@ -884,7 +884,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hi");
 
     const consumePromise = (async () => {
@@ -950,7 +950,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hello");
 
     const consumePromise = (async () => {
