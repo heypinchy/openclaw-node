@@ -1321,4 +1321,54 @@ describe("Chat streaming", () => {
     expect(errorChunk).toBeDefined();
     expect(errorChunk!.text).toBe("LLM request failed.");
   });
+
+  it("ignores unknown lifecycle phases (forward-compat)", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Simulate a future OpenClaw phase the client doesn't know about yet
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "compaction", note: "unknown future phase" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    // Only the final `done` chunk should be present — no start/end/error
+    const nonDone = chunks.filter((c) => c.type !== "done");
+    expect(nonDone).toHaveLength(0);
+  });
 });
