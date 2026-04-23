@@ -69,8 +69,24 @@ export interface ChatOptions {
   timeout?: number;
 }
 
+/**
+ * A single chunk from a streaming chat response.
+ *
+ * - `text` — incremental assistant output
+ * - `tool_use` / `tool_result` — tool invocation lifecycle
+ * - `agent_start` / `agent_end` — per-run lifecycle boundaries (optional, useful for progress UI)
+ * - `error` — terminal failure (provider auth/quota, RPC errors, ...)
+ * - `done` — end of one assistant turn (multi-turn streams emit several)
+ */
 export interface ChatChunk {
-  type: "text" | "tool_use" | "tool_result" | "done" | "error";
+  type:
+    | "text"
+    | "tool_use"
+    | "tool_result"
+    | "done"
+    | "error"
+    | "agent_start"
+    | "agent_end";
   text: string;
 }
 
