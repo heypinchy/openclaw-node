@@ -123,8 +123,22 @@ for await (const chunk of stream) {
     case "tool_result":
       console.log(`✅ Tool result: ${chunk.text}`);
       break;
+    case "agent_start":
+      // Optional: fired when a run begins. Useful for progress indicators.
+      break;
+    case "agent_end":
+      // Optional: fired when a run ends (successfully). Pair with `error` for
+      // full terminal coverage.
+      break;
+    case "error":
+      // Terminal failure. Includes provider-level errors (auth, quota,
+      // rate limits) in addition to RPC errors.
+      console.error(`\n❌ ${chunk.text}`);
+      break;
     case "done":
-      console.log("\n--- Response complete ---");
+      // End of one assistant turn. Multi-turn streams (e.g. with tool
+      // loops) emit several `done` chunks — not a terminator for the stream.
+      console.log("\n--- Turn complete ---");
       break;
   }
 }
