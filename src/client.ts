@@ -67,12 +67,29 @@ export interface ChatOptions {
   extraSystemPrompt?: string;
   label?: string;
   timeout?: number;
+  /**
+   * Optional client-generated message ID (e.g. a UUID from the browser).
+   * When provided, the chat generator will yield a `userMessagePersisted`
+   * chunk (before the first assistant chunk) once the Gateway acknowledges
+   * receipt of the user message. Callers can use this to transition a
+   * message from "sending" to "sent" state.
+   */
+  clientMessageId?: string;
 }
 
-export interface ChatChunk {
-  type: "text" | "tool_use" | "tool_result" | "done" | "error";
-  text: string;
-}
+export type ChatChunk =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; text: string }
+  | { type: "tool_result"; text: string }
+  | { type: "done"; text: string }
+  | { type: "error"; text: string }
+  | {
+      type: "userMessagePersisted";
+      text: string;
+      clientMessageId: string;
+      sessionKey: string | undefined;
+      persistedAt: number;
+    };
 
 const PROTOCOL_VERSION = 3;
 const DEFAULT_SCOPES = ["operator.read", "operator.write"];
@@ -398,8 +415,20 @@ export class OpenClawClient extends EventEmitter {
       if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
         const res = msg as ProtocolResponse;
         const payload = res.payload as Record<string, unknown> | undefined;
-        // Ignore "accepted" responses; only terminate on final "ok" response
+        // "accepted" means the Gateway has received and persisted the user
+        // message in the session. Emit a userMessagePersisted chunk so
+        // callers can transition a message from "sending" to "sent" state.
         if (payload?.status === "accepted") {
+          if (options?.clientMessageId) {
+            chunks.push({
+              type: "userMessagePersisted",
+              text: "",
+              clientMessageId: options.clientMessageId,
+              sessionKey: options.sessionKey,
+              persistedAt: Date.now(),
+            });
+            resolveChunk?.();
+          }
           return;
         }
         // Propagate error responses as error chunks
