@@ -456,6 +456,135 @@ export class OpenClawClient extends EventEmitter {
   }
 
   /**
+   * Re-trigger the assistant response for the last user message already in the
+   * session, WITHOUT appending a new user message. Use this when a message was
+   * delivered but the assistant never responded (orphan case), or when the
+   * assistant response was cut off mid-stream.
+   *
+   * Returns an AsyncGenerator<ChatChunk> — same as chat().
+   */
+  async *continueLastTurn(options: {
+    sessionKey: string;
+    agentId?: string;
+    timeout?: number;
+  }): AsyncGenerator<ChatChunk> {
+    const id = this.generateId();
+
+    this.send({
+      type: "req",
+      id,
+      method: "agent",
+      params: {
+        sessionKey: options.sessionKey,
+        ...(options.agentId !== undefined && { agentId: options.agentId }),
+        ...(options.timeout !== undefined && { timeout: options.timeout }),
+        idempotencyKey: id,
+      },
+    });
+
+    const chunks: ChatChunk[] = [];
+    let done = false;
+    let resolveChunk: (() => void) | null = null;
+    let cumulativeLength = 0;
+
+    // Register in _activeChats so chatAbort() can terminate this generator
+    this._activeChats.set(options.sessionKey, () => {
+      done = true;
+      resolveChunk?.();
+    });
+
+    const onMessage = (msg: ProtocolMessage) => {
+      if (msg.type === "event") {
+        const event = msg as ProtocolEvent;
+        if (
+          event.event === "agent" &&
+          event.payload &&
+          (event.payload as Record<string, unknown>).runId === id
+        ) {
+          const payload = event.payload as Record<string, unknown>;
+          const stream = payload.stream as string | undefined;
+          const data = payload.data as Record<string, unknown> | undefined;
+
+          if (stream === "assistant") {
+            const delta = data?.delta as string | undefined;
+            const text = data?.text as string | undefined;
+            if (typeof delta === "string") {
+              if (delta.length > 0) {
+                if (delta === text && cumulativeLength > 0) {
+                  chunks.push({ type: "done", text: "" });
+                }
+                cumulativeLength = (text ?? "").length;
+                chunks.push({ type: "text", text: delta });
+                resolveChunk?.();
+              }
+            } else if (text !== undefined) {
+              if (text.length < cumulativeLength) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
+              if (text.length > cumulativeLength) {
+                const newText = text.slice(cumulativeLength);
+                cumulativeLength = text.length;
+                chunks.push({ type: "text", text: newText });
+                resolveChunk?.();
+              }
+            }
+          } else if (stream === "tool") {
+            const phase = data?.phase as string | undefined;
+            const toolName = (data?.tool as string) ?? "unknown";
+
+            if (phase === "start") {
+              chunks.push({ type: "tool_use", text: toolName });
+              resolveChunk?.();
+            } else if (phase === "end") {
+              const output = data?.output;
+              const outputText =
+                typeof output === "string" ? output : JSON.stringify(output ?? "");
+              chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+              if (cumulativeLength > 0) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
+              resolveChunk?.();
+            }
+          }
+        }
+      }
+      if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
+        const res = msg as ProtocolResponse;
+        // Propagate error responses as error chunks
+        if (!res.ok && res.error?.message) {
+          chunks.push({ type: "error", text: res.error.message });
+        }
+        done = true;
+        resolveChunk?.();
+      }
+    };
+
+    this.on("_raw", onMessage);
+
+    try {
+      while (!done) {
+        if (chunks.length > 0) {
+          yield chunks.shift()!;
+        } else {
+          await new Promise<void>((r) => {
+            resolveChunk = r;
+          });
+        }
+      }
+      // Yield remaining chunks
+      while (chunks.length > 0) {
+        yield chunks.shift()!;
+      }
+      yield { type: "done", text: "" };
+    } finally {
+      this.off("_raw", onMessage);
+      this._activeChats.delete(options.sessionKey);
+    }
+  }
+
+  /**
    * Send a chat message and return the complete response.
    */
   async chatSync(message: string, options?: ChatOptions): Promise<string> {
