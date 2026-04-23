@@ -327,6 +327,7 @@ export class OpenClawClient extends EventEmitter {
     let done = false;
     let resolveChunk: (() => void) | null = null;
     let cumulativeLength = 0;
+    let errorEmitted = false;
 
     // Register in _activeChats so chatAbort() can terminate this generator
     const abortKey = options?.sessionKey || id;
@@ -422,8 +423,11 @@ export class OpenClawClient extends EventEmitter {
                 typeof rawError === "string" && rawError.trim()
                   ? rawError
                   : "LLM request failed.";
-              chunks.push({ type: "error", text: errorText });
-              resolveChunk?.();
+              if (!errorEmitted) {
+                errorEmitted = true;
+                chunks.push({ type: "error", text: errorText });
+                resolveChunk?.();
+              }
             }
             // Unknown phases silently ignored
           }
@@ -437,7 +441,8 @@ export class OpenClawClient extends EventEmitter {
           return;
         }
         // Propagate error responses as error chunks
-        if (!res.ok && res.error?.message) {
+        if (!res.ok && res.error?.message && !errorEmitted) {
+          errorEmitted = true;
           chunks.push({ type: "error", text: res.error.message });
         }
         done = true;

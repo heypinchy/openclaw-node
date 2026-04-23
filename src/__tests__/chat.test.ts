@@ -1138,6 +1138,57 @@ describe("Chat streaming", () => {
     expect(endChunk!.text).toBe("");
   });
 
+  it("dedupes: lifecycle-error fires first, res.ok=false does not produce a second error chunk", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Lifecycle error first (specific provider text)
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "error", error: "HTTP 401 invalid x-api-key" },
+      },
+    });
+
+    // Then the Gateway also sends ok:false (generic text)
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: false,
+      error: { code: "internal", message: "run failed" },
+    });
+
+    await consumePromise;
+
+    const errorChunks = chunks.filter((c) => c.type === "error");
+    expect(errorChunks).toHaveLength(1);
+    expect(errorChunks[0].text).toBe("HTTP 401 invalid x-api-key");
+  });
+
   it("yields {type: 'agent_start'} when Gateway sends lifecycle.phase=start", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
