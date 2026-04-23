@@ -3,11 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { OpenClawClient } from "../client";
-import {
-  installMockWebSocket,
-  getMockWs,
-  completeHandshake,
-} from "./helpers/mock-ws";
+import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("userMessagePersisted chunk", () => {
   let client: OpenClawClient;
@@ -15,9 +11,7 @@ describe("userMessagePersisted chunk", () => {
 
   beforeEach(async () => {
     installMockWebSocket();
-    tmpDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "openclaw-persist-test-"),
-    );
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-persist-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
       deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
@@ -36,7 +30,12 @@ describe("userMessagePersisted chunk", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; clientMessageId?: string; sessionKey?: string; persistedAt?: number }[] = [];
+    const chunks: {
+      type: string;
+      clientMessageId?: string;
+      sessionKey?: string;
+      persistedAt?: number;
+    }[] = [];
 
     const gen = client.chat("hi", {
       sessionKey: "test:1",

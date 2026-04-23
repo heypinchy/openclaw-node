@@ -31,6 +31,7 @@ npm install openclaw-node
 ```
 
 > **Node.js 22+** works out of the box (built-in WebSocket). For Node.js 20–21, also install `ws`:
+>
 > ```bash
 > npm install openclaw-node ws
 > ```
@@ -86,20 +87,20 @@ console.log(response);
 
 ```typescript
 const client = new OpenClawClient({
-  url: "ws://localhost:18789",  // Gateway address (required)
-  token: "my-secret-token",     // Auth token (optional, must match gateway)
-  autoReconnect: true,          // Reconnect on disconnect (default: true)
-  maxReconnectAttempts: 10,     // Give up after N retries (default: 10)
+  url: "ws://localhost:18789", // Gateway address (required)
+  token: "my-secret-token", // Auth token (optional, must match gateway)
+  autoReconnect: true, // Reconnect on disconnect (default: true)
+  maxReconnectAttempts: 10, // Give up after N retries (default: 10)
 });
 ```
 
 ### Connecting
 
 ```typescript
-await client.connect();    // Connect and authenticate
+await client.connect(); // Connect and authenticate
 await client.disconnect(); // Gracefully close
 
-client.isConnected;        // true/false
+client.isConnected; // true/false
 ```
 
 The client handles all protocol details (challenge-response handshake, authentication, keepalive) automatically.
@@ -108,14 +109,14 @@ The client handles all protocol details (challenge-response handshake, authentic
 
 ```typescript
 const stream = client.chat("Your message here", {
-  sessionKey: "optional-session-id",  // Continue a specific conversation
-  agentId: "optional-agent-id",       // Talk to a specific agent
+  sessionKey: "optional-session-id", // Continue a specific conversation
+  agentId: "optional-agent-id", // Talk to a specific agent
 });
 
 for await (const chunk of stream) {
   switch (chunk.type) {
     case "text":
-      process.stdout.write(chunk.text);  // Partial response text
+      process.stdout.write(chunk.text); // Partial response text
       break;
     case "tool_use":
       console.log(`\n🔧 Using tool: ${chunk.text}`);
@@ -162,7 +163,7 @@ Read and update the Gateway configuration at runtime without restarting.
 // Get the current config and its hash (for optimistic locking)
 const result = await client.config.get();
 console.log(result.config); // full config object
-console.log(result.hash);   // use this as baseHash for patch/apply
+console.log(result.hash); // use this as baseHash for patch/apply
 
 // Patch config (JSON merge patch: objects merge, null deletes, arrays replace)
 await client.config.patch(
@@ -176,6 +177,7 @@ await client.config.apply(JSON.stringify(fullConfig), result.hash);
 ```
 
 Both `patch` and `apply` accept optional parameters:
+
 - `sessionKey` — associate the change with a session
 - `note` — human-readable description of the change
 - `restartDelayMs` — delay before the Gateway restarts affected services
@@ -269,10 +271,10 @@ rl.on("line", async (input) => {
 
 ## Compatibility
 
-| openclaw-node | Gateway Protocol | OpenClaw Gateway | What's new                   |
-|---------------|-----------------|------------------|------------------------------|
-| 0.2.x         | v3              | 0.x (current)    | Tool event streaming         |
-| 0.1.x         | v3              | 0.x              | Initial release              |
+| openclaw-node | Gateway Protocol | OpenClaw Gateway | What's new           |
+| ------------- | ---------------- | ---------------- | -------------------- |
+| 0.2.x         | v3               | 0.x (current)    | Tool event streaming |
+| 0.1.x         | v3               | 0.x              | Initial release      |
 
 If the OpenClaw Gateway bumps its protocol version, you'll need a matching openclaw-node release. Check this table to find the right version.
 

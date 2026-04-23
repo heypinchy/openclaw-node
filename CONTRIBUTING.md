@@ -25,6 +25,7 @@ npm run typecheck  # Type checking
 Open an issue at [github.com/heypinchy/openclaw-node/issues](https://github.com/heypinchy/openclaw-node/issues).
 
 Include:
+
 - Node.js version
 - OpenClaw version
 - Steps to reproduce
