@@ -1,14 +1,21 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
 import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Insecure transport warning", () => {
+  let tmpDir: string;
+
   beforeEach(() => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-security-test-"));
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("warns when using ws:// URL with a token", () => {
@@ -17,6 +24,7 @@ describe("Insecure transport warning", () => {
     new OpenClawClient({
       url: "ws://localhost:18789",
       token: "secret-token",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: false,
     });
 
@@ -33,6 +41,7 @@ describe("Insecure transport warning", () => {
     new OpenClawClient({
       url: "wss://gateway.example.com",
       token: "secret-token",
+      deviceIdentityPath: path.join(tmpDir, "device-identity-wss.json"),
       autoReconnect: false,
     });
 
@@ -44,6 +53,7 @@ describe("Insecure transport warning", () => {
 
     new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity-no-token.json"),
       autoReconnect: false,
     });
 
@@ -53,11 +63,14 @@ describe("Insecure transport warning", () => {
 
 describe("Message size limit", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(async () => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-size-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: false,
     });
     await completeHandshake(client);
@@ -66,6 +79,7 @@ describe("Message size limit", () => {
   afterEach(async () => {
     await client.disconnect();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("rejects messages exceeding maxMessageSize", async () => {
@@ -100,6 +114,7 @@ describe("Message size limit", () => {
 
     const smallClient = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity-small.json"),
       autoReconnect: false,
       maxMessageSize: 1024,
     });
@@ -120,11 +135,14 @@ describe("Message size limit", () => {
 
 describe("Protocol message validation", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(async () => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-validation-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: false,
     });
     await completeHandshake(client);
@@ -133,6 +151,7 @@ describe("Protocol message validation", () => {
   afterEach(async () => {
     await client.disconnect();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("rejects messages with invalid type field", () => {

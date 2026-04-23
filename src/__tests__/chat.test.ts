@@ -1,14 +1,20 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient, type ChatChunk } from "../client";
 import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Chat streaming", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(async () => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-chat-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: false,
     });
     await completeHandshake(client);
@@ -17,6 +23,7 @@ describe("Chat streaming", () => {
   afterEach(async () => {
     await client.disconnect();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("sends agent request with message content", async () => {

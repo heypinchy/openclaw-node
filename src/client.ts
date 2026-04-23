@@ -331,14 +331,7 @@ export class OpenClawClient extends EventEmitter {
     yield* this._streamAgentRequest(id, abortKey, onAccepted);
   }
 
-  /**
-   * Re-trigger the assistant response for the last user message already in the
-   * session, WITHOUT appending a new user message. Use this when a message was
-   * delivered but the assistant never responded (orphan case), or when the
-   * assistant response was cut off mid-stream.
-   *
-   * Returns an AsyncGenerator<ChatChunk> — same as chat().
-   */
+  // re-triggers assistant response without appending a new user message
   async *continueLastTurn(options: {
     sessionKey: string;
     agentId?: string;
@@ -361,16 +354,7 @@ export class OpenClawClient extends EventEmitter {
     yield* this._streamAgentRequest(id, options.sessionKey);
   }
 
-  /**
-   * Shared streaming machinery used by both chat() and continueLastTurn().
-   *
-   * Listens on the "_raw" event bus for agent events and response messages
-   * matching `requestId`, buffers chunks, and yields them in order.
-   * The `abortKey` is used to register a cancellation callback in
-   * `_activeChats` so chatAbort() can terminate the generator early.
-   * The optional `onAccepted` callback is invoked when the Gateway sends a
-   * `status: "accepted"` response; its return value is yielded as a chunk.
-   */
+  // shared streaming machinery for chat() and continueLastTurn()
   private async *_streamAgentRequest(
     requestId: string,
     abortKey: string,

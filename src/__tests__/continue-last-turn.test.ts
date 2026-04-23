@@ -190,6 +190,63 @@ describe("continueLastTurn", () => {
     expect(chunks.some((c) => c.type === "userMessagePersisted")).toBe(false);
   });
 
+  it("chatAbort terminates a continueLastTurn generator", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const sessionKey = "abort-continue-session";
+    const chunks: ChatChunk[] = [];
+    let generatorDone = false;
+
+    const gen = client.continueLastTurn({ sessionKey });
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+      generatorDone = true;
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    // Gateway streams some assistant text
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Starting response...", delta: "Starting response..." },
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(generatorDone).toBe(false);
+
+    // Abort — should terminate the generator locally
+    const abortSentBefore = ws.sent.length;
+    const abortPromise = client.chatAbort(sessionKey);
+
+    // Respond to the abort request
+    const abortMsg = JSON.parse(ws.sent[abortSentBefore]);
+    ws.simulateMessage({
+      type: "res",
+      id: abortMsg.id,
+      ok: true,
+      payload: { status: "ok" },
+    });
+
+    await abortPromise;
+    await consumePromise;
+
+    expect(generatorDone).toBe(true);
+    const doneChunk = chunks.find((c) => c.type === "done");
+    expect(doneChunk).toBeDefined();
+  });
+
   it("includes idempotencyKey in the request params", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
