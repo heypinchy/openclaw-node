@@ -413,6 +413,9 @@ export class OpenClawClient extends EventEmitter {
             if (phase === "start") {
               chunks.push({ type: "agent_start", text: "" });
               resolveChunk?.();
+            } else if (phase === "end") {
+              chunks.push({ type: "agent_end", text: "" });
+              resolveChunk?.();
             } else if (phase === "error") {
               const rawError = data?.error;
               const errorText =

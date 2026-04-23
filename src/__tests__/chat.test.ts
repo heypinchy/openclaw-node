@@ -1089,6 +1089,55 @@ describe("Chat streaming", () => {
     expect(errorChunk!.text).toBe("HTTP 401 authentication_error: invalid x-api-key");
   });
 
+  it("yields {type: 'agent_end'} when Gateway sends lifecycle.phase=end", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "end", endedAt: Date.now() },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const endChunk = chunks.find((c) => c.type === "agent_end");
+    expect(endChunk).toBeDefined();
+    expect(endChunk!.text).toBe("");
+  });
+
   it("yields {type: 'agent_start'} when Gateway sends lifecycle.phase=start", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
