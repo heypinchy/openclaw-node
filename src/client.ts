@@ -410,7 +410,10 @@ export class OpenClawClient extends EventEmitter {
             }
           } else if (stream === "lifecycle") {
             const phase = data?.phase as string | undefined;
-            if (phase === "error") {
+            if (phase === "start") {
+              chunks.push({ type: "agent_start", text: "" });
+              resolveChunk?.();
+            } else if (phase === "error") {
               const rawError = data?.error;
               const errorText =
                 typeof rawError === "string" && rawError.trim()
@@ -419,8 +422,7 @@ export class OpenClawClient extends EventEmitter {
               chunks.push({ type: "error", text: errorText });
               resolveChunk?.();
             }
-            // Unknown phases (including "start", "end", and future additions)
-            // are handled in subsequent tasks.
+            // Unknown phases silently ignored
           }
         }
       }
