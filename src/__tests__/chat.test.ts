@@ -1032,4 +1032,60 @@ describe("Chat streaming", () => {
     const textOnly = chunks.filter((c) => c.type === "text").map((c) => c.text);
     expect(textOnly).toEqual(["I will look this up.", "Hi", " there"]);
   });
+
+  it("yields {type: 'error'} when Gateway sends lifecycle.phase=error", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // OpenClaw's embedded runner emits provider failures as lifecycle events
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: {
+          phase: "error",
+          error: "HTTP 401 authentication_error: invalid x-api-key",
+          livenessState: "blocked",
+          endedAt: Date.now(),
+        },
+      },
+    });
+
+    // Followed by the normal ok response (run completed, just with error state)
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const errorChunk = chunks.find((c) => c.type === "error");
+    expect(errorChunk).toBeDefined();
+    expect(errorChunk!.text).toBe("HTTP 401 authentication_error: invalid x-api-key");
+  });
 });

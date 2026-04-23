@@ -408,6 +408,19 @@ export class OpenClawClient extends EventEmitter {
               }
               resolveChunk?.();
             }
+          } else if (stream === "lifecycle") {
+            const phase = data?.phase as string | undefined;
+            if (phase === "error") {
+              const rawError = data?.error;
+              const errorText =
+                typeof rawError === "string" && rawError.trim()
+                  ? rawError
+                  : "LLM request failed.";
+              chunks.push({ type: "error", text: errorText });
+              resolveChunk?.();
+            }
+            // Unknown phases (including "start", "end", and future additions)
+            // are handled in subsequent tasks.
           }
         }
       }
