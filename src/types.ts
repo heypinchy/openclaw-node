@@ -154,16 +154,6 @@ export interface ChatAttachment {
   content: string;
 }
 
-// --- Chat ---
-
-export interface ChatMessage {
-  type: "text" | "tool_use" | "tool_result" | "done" | "error";
-  text?: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  error?: string;
-}
-
 // --- Sessions ---
 
 export interface Session {
