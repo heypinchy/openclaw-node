@@ -79,14 +79,7 @@ export interface ChatOptions {
  * - `done` — end of one assistant turn (multi-turn streams emit several)
  */
 export interface ChatChunk {
-  type:
-    | "text"
-    | "tool_use"
-    | "tool_result"
-    | "done"
-    | "error"
-    | "agent_start"
-    | "agent_end";
+  type: "text" | "tool_use" | "tool_result" | "done" | "error" | "agent_start" | "agent_end";
   text: string;
 }
 
@@ -420,9 +413,7 @@ export class OpenClawClient extends EventEmitter {
             } else if (phase === "error") {
               const rawError = data?.error;
               const errorText =
-                typeof rawError === "string" && rawError.trim()
-                  ? rawError
-                  : "LLM request failed.";
+                typeof rawError === "string" && rawError.trim() ? rawError : "LLM request failed.";
               if (!errorEmitted) {
                 errorEmitted = true;
                 chunks.push({ type: "error", text: errorText });
