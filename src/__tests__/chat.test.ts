@@ -1237,4 +1237,39 @@ describe("Chat streaming", () => {
     expect(startChunk).toBeDefined();
     expect(startChunk!.text).toBe("");
   });
+
+  it("dedupes: res.ok=false fires first, later lifecycle-error does not produce a second error chunk", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    // res.ok:false first — this also terminates the stream, so any
+    // subsequent lifecycle-error would have nowhere to arrive, but the
+    // test still documents the invariant.
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: false,
+      error: { code: "overloaded", message: "AI service temporarily overloaded" },
+    });
+
+    await consumePromise;
+
+    const errorChunks = chunks.filter((c) => c.type === "error");
+    expect(errorChunks).toHaveLength(1);
+    expect(errorChunks[0].text).toBe("AI service temporarily overloaded");
+  });
 });
