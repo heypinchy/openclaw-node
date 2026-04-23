@@ -314,6 +314,68 @@ export class OpenClawClient extends EventEmitter {
       },
     });
 
+    const abortKey = options?.sessionKey || id;
+    const onAccepted =
+      options?.clientMessageId != null
+        ? () => {
+            const chunk: ChatChunk = {
+              type: "userMessagePersisted",
+              clientMessageId: options.clientMessageId!,
+              sessionKey: options.sessionKey,
+              persistedAt: Date.now(),
+            };
+            return chunk;
+          }
+        : undefined;
+
+    yield* this._streamAgentRequest(id, abortKey, onAccepted);
+  }
+
+  /**
+   * Re-trigger the assistant response for the last user message already in the
+   * session, WITHOUT appending a new user message. Use this when a message was
+   * delivered but the assistant never responded (orphan case), or when the
+   * assistant response was cut off mid-stream.
+   *
+   * Returns an AsyncGenerator<ChatChunk> — same as chat().
+   */
+  async *continueLastTurn(options: {
+    sessionKey: string;
+    agentId?: string;
+    timeout?: number;
+  }): AsyncGenerator<ChatChunk> {
+    const id = this.generateId();
+
+    this.send({
+      type: "req",
+      id,
+      method: "agent",
+      params: {
+        sessionKey: options.sessionKey,
+        ...(options.agentId !== undefined && { agentId: options.agentId }),
+        ...(options.timeout !== undefined && { timeout: options.timeout }),
+        idempotencyKey: id,
+      },
+    });
+
+    yield* this._streamAgentRequest(id, options.sessionKey);
+  }
+
+  /**
+   * Shared streaming machinery used by both chat() and continueLastTurn().
+   *
+   * Listens on the "_raw" event bus for agent events and response messages
+   * matching `requestId`, buffers chunks, and yields them in order.
+   * The `abortKey` is used to register a cancellation callback in
+   * `_activeChats` so chatAbort() can terminate the generator early.
+   * The optional `onAccepted` callback is invoked when the Gateway sends a
+   * `status: "accepted"` response; its return value is yielded as a chunk.
+   */
+  private async *_streamAgentRequest(
+    requestId: string,
+    abortKey: string,
+    onAccepted?: () => ChatChunk,
+  ): AsyncGenerator<ChatChunk> {
     // Collect streaming chunks until done.
     // OpenClaw sends cumulative text in "agent" events (stream: "assistant"),
     // so we track the previous length and yield only the new portion.
@@ -323,7 +385,6 @@ export class OpenClawClient extends EventEmitter {
     let cumulativeLength = 0;
 
     // Register in _activeChats so chatAbort() can terminate this generator
-    const abortKey = options?.sessionKey || id;
     this._activeChats.set(abortKey, () => {
       done = true;
       resolveChunk?.();
@@ -335,7 +396,7 @@ export class OpenClawClient extends EventEmitter {
         if (
           event.event === "agent" &&
           event.payload &&
-          (event.payload as Record<string, unknown>).runId === id
+          (event.payload as Record<string, unknown>).runId === requestId
         ) {
           const payload = event.payload as Record<string, unknown>;
           const stream = payload.stream as string | undefined;
@@ -405,20 +466,15 @@ export class OpenClawClient extends EventEmitter {
           }
         }
       }
-      if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
+      if (msg.type === "res" && (msg as ProtocolResponse).id === requestId) {
         const res = msg as ProtocolResponse;
         const payload = res.payload as Record<string, unknown> | undefined;
         // "accepted" means the Gateway has received and persisted the user
         // message in the session. Emit a userMessagePersisted chunk so
         // callers can transition a message from "sending" to "sent" state.
         if (payload?.status === "accepted") {
-          if (options?.clientMessageId) {
-            chunks.push({
-              type: "userMessagePersisted",
-              clientMessageId: options.clientMessageId,
-              sessionKey: options.sessionKey,
-              persistedAt: Date.now(),
-            });
+          if (onAccepted) {
+            chunks.push(onAccepted());
             resolveChunk?.();
           }
           return;
@@ -452,135 +508,6 @@ export class OpenClawClient extends EventEmitter {
     } finally {
       this.off("_raw", onMessage);
       this._activeChats.delete(abortKey);
-    }
-  }
-
-  /**
-   * Re-trigger the assistant response for the last user message already in the
-   * session, WITHOUT appending a new user message. Use this when a message was
-   * delivered but the assistant never responded (orphan case), or when the
-   * assistant response was cut off mid-stream.
-   *
-   * Returns an AsyncGenerator<ChatChunk> — same as chat().
-   */
-  async *continueLastTurn(options: {
-    sessionKey: string;
-    agentId?: string;
-    timeout?: number;
-  }): AsyncGenerator<ChatChunk> {
-    const id = this.generateId();
-
-    this.send({
-      type: "req",
-      id,
-      method: "agent",
-      params: {
-        sessionKey: options.sessionKey,
-        ...(options.agentId !== undefined && { agentId: options.agentId }),
-        ...(options.timeout !== undefined && { timeout: options.timeout }),
-        idempotencyKey: id,
-      },
-    });
-
-    const chunks: ChatChunk[] = [];
-    let done = false;
-    let resolveChunk: (() => void) | null = null;
-    let cumulativeLength = 0;
-
-    // Register in _activeChats so chatAbort() can terminate this generator
-    this._activeChats.set(options.sessionKey, () => {
-      done = true;
-      resolveChunk?.();
-    });
-
-    const onMessage = (msg: ProtocolMessage) => {
-      if (msg.type === "event") {
-        const event = msg as ProtocolEvent;
-        if (
-          event.event === "agent" &&
-          event.payload &&
-          (event.payload as Record<string, unknown>).runId === id
-        ) {
-          const payload = event.payload as Record<string, unknown>;
-          const stream = payload.stream as string | undefined;
-          const data = payload.data as Record<string, unknown> | undefined;
-
-          if (stream === "assistant") {
-            const delta = data?.delta as string | undefined;
-            const text = data?.text as string | undefined;
-            if (typeof delta === "string") {
-              if (delta.length > 0) {
-                if (delta === text && cumulativeLength > 0) {
-                  chunks.push({ type: "done", text: "" });
-                }
-                cumulativeLength = (text ?? "").length;
-                chunks.push({ type: "text", text: delta });
-                resolveChunk?.();
-              }
-            } else if (text !== undefined) {
-              if (text.length < cumulativeLength) {
-                chunks.push({ type: "done", text: "" });
-                cumulativeLength = 0;
-              }
-              if (text.length > cumulativeLength) {
-                const newText = text.slice(cumulativeLength);
-                cumulativeLength = text.length;
-                chunks.push({ type: "text", text: newText });
-                resolveChunk?.();
-              }
-            }
-          } else if (stream === "tool") {
-            const phase = data?.phase as string | undefined;
-            const toolName = (data?.tool as string) ?? "unknown";
-
-            if (phase === "start") {
-              chunks.push({ type: "tool_use", text: toolName });
-              resolveChunk?.();
-            } else if (phase === "end") {
-              const output = data?.output;
-              const outputText =
-                typeof output === "string" ? output : JSON.stringify(output ?? "");
-              chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
-              if (cumulativeLength > 0) {
-                chunks.push({ type: "done", text: "" });
-                cumulativeLength = 0;
-              }
-              resolveChunk?.();
-            }
-          }
-        }
-      }
-      if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
-        const res = msg as ProtocolResponse;
-        // Propagate error responses as error chunks
-        if (!res.ok && res.error?.message) {
-          chunks.push({ type: "error", text: res.error.message });
-        }
-        done = true;
-        resolveChunk?.();
-      }
-    };
-
-    this.on("_raw", onMessage);
-
-    try {
-      while (!done) {
-        if (chunks.length > 0) {
-          yield chunks.shift()!;
-        } else {
-          await new Promise<void>((r) => {
-            resolveChunk = r;
-          });
-        }
-      }
-      // Yield remaining chunks
-      while (chunks.length > 0) {
-        yield chunks.shift()!;
-      }
-      yield { type: "done", text: "" };
-    } finally {
-      this.off("_raw", onMessage);
-      this._activeChats.delete(options.sessionKey);
     }
   }
 
