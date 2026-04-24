@@ -1039,4 +1039,334 @@ describe("Chat streaming", () => {
     const textOnly = chunks.filter((c) => c.type === "text").map((c) => c.text);
     expect(textOnly).toEqual(["I will look this up.", "Hi", " there"]);
   });
+
+  it("yields {type: 'error'} when Gateway sends lifecycle.phase=error", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: {
+          phase: "error",
+          error: "HTTP 401 authentication_error: invalid x-api-key",
+          livenessState: "blocked",
+          endedAt: Date.now(),
+        },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const errorChunk = chunks.find((c) => c.type === "error");
+    expect(errorChunk).toBeDefined();
+    expect(errorChunk!.text).toBe("HTTP 401 authentication_error: invalid x-api-key");
+  });
+
+  it("yields {type: 'agent_start'} when Gateway sends lifecycle.phase=start", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "start", startedAt: Date.now() },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const startChunk = chunks.find((c) => c.type === "agent_start");
+    expect(startChunk).toBeDefined();
+    expect(startChunk!.text).toBe("");
+  });
+
+  it("yields {type: 'agent_end'} when Gateway sends lifecycle.phase=end", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "end", endedAt: Date.now() },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const endChunk = chunks.find((c) => c.type === "agent_end");
+    expect(endChunk).toBeDefined();
+    expect(endChunk!.text).toBe("");
+  });
+
+  it("dedupes: lifecycle-error fires first, res.ok=false does not produce a second error chunk", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "error", error: "HTTP 401 invalid x-api-key" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: false,
+      error: { code: "internal", message: "run failed" },
+    });
+
+    await consumePromise;
+
+    const errorChunks = chunks.filter((c) => c.type === "error");
+    expect(errorChunks).toHaveLength(1);
+    expect(errorChunks[0].text).toBe("HTTP 401 invalid x-api-key");
+  });
+
+  it("dedupes: res.ok=false fires first, later lifecycle-error does not produce a second error chunk", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: false,
+      error: { code: "overloaded", message: "AI service temporarily overloaded" },
+    });
+
+    await consumePromise;
+
+    const errorChunks = chunks.filter((c) => c.type === "error");
+    expect(errorChunks).toHaveLength(1);
+    expect(errorChunks[0].text).toBe("AI service temporarily overloaded");
+  });
+
+  it("falls back to 'LLM request failed.' when lifecycle.data.error is missing or empty", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "error" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const errorChunk = chunks.find((c) => c.type === "error");
+    expect(errorChunk).toBeDefined();
+    expect(errorChunk!.text).toBe("LLM request failed.");
+  });
+
+  it("ignores unknown lifecycle phases (forward-compat)", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: { type: string; text: string }[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk as { type: string; text: string });
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "compaction", note: "unknown future phase" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const nonDone = chunks.filter((c) => c.type !== "done");
+    expect(nonDone).toHaveLength(0);
+  });
 });
