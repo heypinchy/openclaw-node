@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../src/client";
 
 // We test the config namespace by spying on the `request` method
@@ -7,15 +10,25 @@ import { OpenClawClient } from "../src/client";
 describe("config namespace", () => {
   let client: OpenClawClient;
   let requestSpy: ReturnType<typeof vi.spyOn>;
+  let tmpDir: string;
 
   beforeEach(() => {
-    client = new OpenClawClient({ url: "ws://localhost:18789" });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-config-test-"));
+    client = new OpenClawClient({
+      url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
+    });
     requestSpy = vi.spyOn(client, "request").mockResolvedValue({
       type: "res",
       id: "test-id",
       ok: true,
       payload: { config: { agents: {} }, hash: "abc123" },
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   describe("config.get", () => {

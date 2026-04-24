@@ -9,7 +9,13 @@ import {
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
-import { loadOrCreateDeviceIdentity, buildSignedDevice, type DeviceIdentityData } from "./device";
+import {
+  loadOrCreateDeviceIdentity,
+  buildSignedDevice,
+  saveDeviceToken,
+  clearDeviceToken,
+  type DeviceIdentityData,
+} from "./device";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
@@ -61,12 +67,22 @@ export interface ChatOptions {
   extraSystemPrompt?: string;
   label?: string;
   timeout?: number;
+  // when provided, yields a userMessagePersisted chunk once the Gateway acknowledges receipt
+  clientMessageId?: string;
 }
 
-export interface ChatChunk {
-  type: "text" | "tool_use" | "tool_result" | "done" | "error";
-  text: string;
-}
+export type ChatChunk =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; text: string }
+  | { type: "tool_result"; text: string }
+  | { type: "done"; text: string }
+  | { type: "error"; text: string }
+  | {
+      type: "userMessagePersisted";
+      clientMessageId: string;
+      sessionKey: string | undefined;
+      persistedAt: number;
+    };
 
 const PROTOCOL_VERSION = 3;
 const DEFAULT_SCOPES = ["operator.read", "operator.write"];
@@ -99,6 +115,17 @@ export class OpenClawClient extends EventEmitter {
   private _shouldReconnect = true;
   private _availableMethods: string[] = [];
   private deviceIdentity: DeviceIdentityData | null = null;
+  private deviceIdentityPath: string | null = null;
+  /**
+   * Per-connect-attempt bookkeeping. Reset on every connect() call. Lets
+   * us tell "connection closed before authentication completed while we
+   * were using the persisted deviceToken" apart from a network blip after
+   * a successful handshake.
+   */
+  private currentAttempt: {
+    usedPersistedToken: boolean;
+    reachedHelloOk: boolean;
+  } | null = null;
 
   constructor(options: OpenClawClientOptions) {
     super();
@@ -120,10 +147,44 @@ export class OpenClawClient extends EventEmitter {
       );
     }
 
-    this.deviceIdentity = loadOrCreateDeviceIdentity(
+    this.deviceIdentityPath =
       this.options.deviceIdentityPath ||
-        `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`,
-    );
+      `${process.env.HOME || "/tmp"}/.openclaw/device-identity.json`;
+    this.deviceIdentity = loadOrCreateDeviceIdentity(this.deviceIdentityPath);
+  }
+
+  private persistDeviceTokenIfChanged(deviceToken: string | undefined): void {
+    if (!deviceToken || !this.deviceIdentityPath) return;
+    if (this.deviceIdentity?.deviceToken === deviceToken) return;
+    try {
+      saveDeviceToken(this.deviceIdentityPath, deviceToken);
+      if (this.deviceIdentity) this.deviceIdentity.deviceToken = deviceToken;
+    } catch (err) {
+      this.emit("error", err instanceof Error ? err : new Error("Failed to persist deviceToken"));
+    }
+  }
+
+  /**
+   * Called when the WebSocket closes or errors before a hello-ok arrives.
+   * If we were using the persisted deviceToken, the gateway has effectively
+   * rejected it — clear it so the next reconnect attempt falls back to the
+   * bootstrap token (which triggers a re-pair and a fresh deviceToken).
+   */
+  private handleConnectFailure(rejectConnectPromise?: (err: Error) => void): void {
+    const attempt = this.currentAttempt;
+    if (!attempt) return;
+    if (!attempt.reachedHelloOk && attempt.usedPersistedToken && this.deviceIdentityPath) {
+      try {
+        clearDeviceToken(this.deviceIdentityPath);
+      } catch {
+        // Best-effort: next attempt will just retry with the same (stale) token.
+      }
+      if (this.deviceIdentity) this.deviceIdentity.deviceToken = undefined;
+    }
+    if (!attempt.reachedHelloOk && rejectConnectPromise) {
+      rejectConnectPromise(new Error("WebSocket closed before handshake completed"));
+    }
+    this.currentAttempt = null;
   }
 
   get isConnected(): boolean {
@@ -145,6 +206,7 @@ export class OpenClawClient extends EventEmitter {
    */
   async connect(): Promise<HelloOk> {
     this._shouldReconnect = true;
+    this.currentAttempt = { usedPersistedToken: false, reachedHelloOk: false };
     const WS = getWebSocket();
 
     return new Promise<HelloOk>((resolve, reject) => {
@@ -195,12 +257,14 @@ export class OpenClawClient extends EventEmitter {
         // Node.js built-in WebSocket does not fire "close" after connection error,
         // so trigger reconnect directly from the error handler as well.
         this._isConnected = false;
+        this.handleConnectFailure();
         this.maybeReconnect();
       };
 
       const onClose = () => {
         this._isConnected = false;
         this.emit("disconnected", { reason: "closed" });
+        this.handleConnectFailure(reject);
         this.maybeReconnect();
       };
 
@@ -250,6 +314,52 @@ export class OpenClawClient extends EventEmitter {
       },
     });
 
+    const abortKey = options?.sessionKey || id;
+    const onAccepted =
+      options?.clientMessageId != null
+        ? () => {
+            const chunk: ChatChunk = {
+              type: "userMessagePersisted",
+              clientMessageId: options.clientMessageId!,
+              sessionKey: options.sessionKey,
+              persistedAt: Date.now(),
+            };
+            return chunk;
+          }
+        : undefined;
+
+    yield* this._streamAgentRequest(id, abortKey, onAccepted);
+  }
+
+  // re-triggers assistant response without appending a new user message
+  async *continueLastTurn(options: {
+    sessionKey: string;
+    agentId?: string;
+    timeout?: number;
+  }): AsyncGenerator<ChatChunk> {
+    const id = this.generateId();
+
+    this.send({
+      type: "req",
+      id,
+      method: "agent",
+      params: {
+        sessionKey: options.sessionKey,
+        ...(options.agentId !== undefined && { agentId: options.agentId }),
+        ...(options.timeout !== undefined && { timeout: options.timeout }),
+        idempotencyKey: id,
+      },
+    });
+
+    yield* this._streamAgentRequest(id, options.sessionKey);
+  }
+
+  // shared streaming machinery for chat() and continueLastTurn()
+  private async *_streamAgentRequest(
+    requestId: string,
+    abortKey: string,
+    onAccepted?: () => ChatChunk,
+  ): AsyncGenerator<ChatChunk> {
     // Collect streaming chunks until done.
     // OpenClaw sends cumulative text in "agent" events (stream: "assistant"),
     // so we track the previous length and yield only the new portion.
@@ -259,7 +369,6 @@ export class OpenClawClient extends EventEmitter {
     let cumulativeLength = 0;
 
     // Register in _activeChats so chatAbort() can terminate this generator
-    const abortKey = options?.sessionKey || id;
     this._activeChats.set(abortKey, () => {
       done = true;
       resolveChunk?.();
@@ -271,19 +380,49 @@ export class OpenClawClient extends EventEmitter {
         if (
           event.event === "agent" &&
           event.payload &&
-          (event.payload as Record<string, unknown>).runId === id
+          (event.payload as Record<string, unknown>).runId === requestId
         ) {
           const payload = event.payload as Record<string, unknown>;
           const stream = payload.stream as string | undefined;
           const data = payload.data as Record<string, unknown> | undefined;
 
           if (stream === "assistant") {
+            const delta = data?.delta as string | undefined;
             const text = data?.text as string | undefined;
-            if (text && text.length > cumulativeLength) {
-              const newText = text.slice(cumulativeLength);
-              cumulativeLength = text.length;
-              chunks.push({ type: "text", text: newText });
-              resolveChunk?.();
+            if (typeof delta === "string") {
+              // Preferred path: OpenClaw emits the just-added slice in
+              // `delta`. Use it directly — unambiguous across turns.
+              if (delta.length > 0) {
+                // Turn-boundary detection: OpenClaw's visibleTextAccumulator
+                // restarts at 0 for each new assistant turn (e.g. after a
+                // tool round-trip). The first event of a new turn therefore
+                // has delta === text. We only treat that as a boundary if
+                // we've already seen content from a previous turn
+                // (cumulativeLength > 0), otherwise the very first chunk
+                // of the whole stream would be flagged as a boundary too.
+                if (delta === text && cumulativeLength > 0) {
+                  chunks.push({ type: "done", text: "" });
+                }
+                cumulativeLength = (text ?? "").length;
+                chunks.push({ type: "text", text: delta });
+                resolveChunk?.();
+              }
+            } else if (text !== undefined) {
+              // Backwards-compat path for OpenClaw releases that only emit
+              // `text` (cumulative within a turn). A new turn restarts the
+              // counter at 0 — when we see the length drop below our
+              // watermark, treat that as a turn boundary (this path is
+              // relevant when no tool event sat between the two turns).
+              if (text.length < cumulativeLength) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
+              if (text.length > cumulativeLength) {
+                const newText = text.slice(cumulativeLength);
+                cumulativeLength = text.length;
+                chunks.push({ type: "text", text: newText });
+                resolveChunk?.();
+              }
             }
           } else if (stream === "tool") {
             const phase = data?.phase as string | undefined;
@@ -296,16 +435,32 @@ export class OpenClawClient extends EventEmitter {
               const output = data?.output;
               const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
               chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+              // A completed tool call ends the current assistant turn. Only
+              // emit the turn-boundary marker if we've actually seen
+              // assistant text in this turn (cumulativeLength > 0) — back-
+              // to-back tool calls without intervening text should not
+              // produce spurious boundaries. Then reset the watermark so
+              // the legacy `text`-only path correctly tracks the next turn.
+              if (cumulativeLength > 0) {
+                chunks.push({ type: "done", text: "" });
+                cumulativeLength = 0;
+              }
               resolveChunk?.();
             }
           }
         }
       }
-      if (msg.type === "res" && (msg as ProtocolResponse).id === id) {
+      if (msg.type === "res" && (msg as ProtocolResponse).id === requestId) {
         const res = msg as ProtocolResponse;
         const payload = res.payload as Record<string, unknown> | undefined;
-        // Ignore "accepted" responses; only terminate on final "ok" response
+        // "accepted" means the Gateway has received and persisted the user
+        // message in the session. Emit a userMessagePersisted chunk so
+        // callers can transition a message from "sending" to "sent" state.
         if (payload?.status === "accepted") {
+          if (onAccepted) {
+            chunks.push(onAccepted());
+            resolveChunk?.();
+          }
           return;
         }
         // Propagate error responses as error chunks
@@ -565,8 +720,10 @@ export class OpenClawClient extends EventEmitter {
       if (res.ok && res.payload && (res.payload as unknown as HelloOk).type === "hello-ok") {
         this._isConnected = true;
         this.reconnectAttempts = 0;
+        if (this.currentAttempt) this.currentAttempt.reachedHelloOk = true;
         const helloOk = res.payload as unknown as HelloOk;
         this._availableMethods = helloOk.features?.methods ?? [];
+        this.persistDeviceTokenIfChanged(helloOk.auth?.deviceToken);
         this.emit("connected", helloOk);
         connectResolve?.(helloOk);
         return;
@@ -592,6 +749,15 @@ export class OpenClawClient extends EventEmitter {
     const role = this.options.role || "operator";
     const scopes = this.options.scopes || DEFAULT_SCOPES;
 
+    // Prefer the persisted per-device token (issued by the Gateway on a
+    // previous successful connect) over the bootstrap token. The Gateway
+    // rejects the bootstrap token for already-paired devices.
+    const persistedToken = this.deviceIdentity?.deviceToken;
+    const connectToken = persistedToken || this.options.token;
+    if (this.currentAttempt) {
+      this.currentAttempt.usedPersistedToken = Boolean(persistedToken);
+    }
+
     const device = this.deviceIdentity
       ? buildSignedDevice({
           identity: this.deviceIdentity,
@@ -600,7 +766,7 @@ export class OpenClawClient extends EventEmitter {
           clientMode: "backend",
           role,
           scopes,
-          token: this.options.token,
+          token: connectToken,
         })
       : undefined;
 
@@ -619,7 +785,7 @@ export class OpenClawClient extends EventEmitter {
       commands: [],
       permissions: {},
       auth: {
-        token: this.options.token,
+        token: connectToken,
       },
       locale: Intl.DateTimeFormat().resolvedOptions().locale || "en-US",
       userAgent: `openclaw-node/0.2.1`,

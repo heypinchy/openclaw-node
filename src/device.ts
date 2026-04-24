@@ -6,6 +6,13 @@ export interface DeviceIdentityData {
   deviceId: string;
   publicKeyPem: string;
   privateKeyPem: string;
+  /**
+   * Per-device token issued by the Gateway in the `hello-ok` payload after
+   * successful pairing. Persisted so reconnects use it instead of the
+   * bootstrap token, which no longer works for already-paired devices in
+   * OpenClaw 2026.4.x.
+   */
+  deviceToken?: string;
 }
 
 export interface BuildSignedDeviceParams {
@@ -66,6 +73,7 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentityData
           deviceId: parsed.deviceId,
           publicKeyPem: parsed.publicKeyPem,
           privateKeyPem: parsed.privateKeyPem,
+          ...(typeof parsed.deviceToken === "string" ? { deviceToken: parsed.deviceToken } : {}),
         };
       }
     }
@@ -121,4 +129,34 @@ export function buildSignedDevice(params: BuildSignedDeviceParams): SignedDevice
     signedAt,
     nonce,
   };
+}
+
+/**
+ * Atomic merge-write of the device identity file: reads the existing file,
+ * applies `mutate`, writes to a tmp file, then renames. The keypair is never
+ * rewritten from scratch — only the fields the caller touches change.
+ */
+function updateDeviceIdentityFile(
+  filePath: string,
+  mutate: (data: Record<string, unknown>) => void,
+): void {
+  const raw = fs.readFileSync(filePath, "utf8");
+  const data = JSON.parse(raw) as Record<string, unknown>;
+  mutate(data);
+  const tmpPath = `${filePath}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmpPath, filePath);
+}
+
+export function saveDeviceToken(filePath: string, deviceToken: string): void {
+  updateDeviceIdentityFile(filePath, (data) => {
+    data.deviceToken = deviceToken;
+  });
+}
+
+export function clearDeviceToken(filePath: string): void {
+  if (!fs.existsSync(filePath)) return;
+  updateDeviceIdentityFile(filePath, (data) => {
+    if ("deviceToken" in data) delete data.deviceToken;
+  });
 }

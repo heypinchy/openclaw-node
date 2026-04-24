@@ -1,23 +1,30 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../client";
 import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Auto-reconnect with exponential backoff", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(() => {
     vi.useFakeTimers();
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-reconnect-test-"));
   });
 
   afterEach(async () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("reconnects after unexpected close", async () => {
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 5,
@@ -40,6 +47,7 @@ describe("Auto-reconnect with exponential backoff", () => {
   it("uses exponential backoff: 1s, 2s, 4s, 8s", async () => {
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 10,
@@ -100,6 +108,7 @@ describe("Auto-reconnect with exponential backoff", () => {
   it("stops reconnecting after max attempts and emits error", async () => {
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 2,
@@ -137,6 +146,7 @@ describe("Auto-reconnect with exponential backoff", () => {
   it("does NOT reconnect after explicit disconnect()", async () => {
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 5,
@@ -158,6 +168,7 @@ describe("Auto-reconnect with exponential backoff", () => {
   it("resets backoff counter after successful reconnect", async () => {
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectAttempts: 10,

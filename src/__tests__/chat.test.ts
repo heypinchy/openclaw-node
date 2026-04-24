@@ -1,14 +1,20 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { OpenClawClient } from "../client";
+import { OpenClawClient, type ChatChunk } from "../client";
 import { installMockWebSocket, getMockWs, completeHandshake } from "./helpers/mock-ws";
 
 describe("Chat streaming", () => {
   let client: OpenClawClient;
+  let tmpDir: string;
 
   beforeEach(async () => {
     installMockWebSocket();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-chat-test-"));
     client = new OpenClawClient({
       url: "ws://localhost:18789",
+      deviceIdentityPath: path.join(tmpDir, "device-identity.json"),
       autoReconnect: false,
     });
     await completeHandshake(client);
@@ -17,6 +23,7 @@ describe("Chat streaming", () => {
   afterEach(async () => {
     await client.disconnect();
     vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("sends agent request with message content", async () => {
@@ -478,7 +485,7 @@ describe("Chat streaming", () => {
     const sentBefore = ws.sent.length;
 
     const sessionKey = "abort-test-session";
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     let generatorDone = false;
 
     const gen = client.chat("Tell me a long story", { sessionKey });
@@ -538,7 +545,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hello");
 
     const consumePromise = (async () => {
@@ -571,7 +578,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Search for cats");
 
     const consumePromise = (async () => {
@@ -646,7 +653,7 @@ describe("Chat streaming", () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
 
-    const chunks: { type: string; text: string }[] = [];
+    const chunks: ChatChunk[] = [];
     const gen = client.chat("Hello");
 
     const consumePromise = (async () => {
@@ -690,5 +697,346 @@ describe("Chat streaming", () => {
 
     const toolChunks = chunks.filter((c) => c.type === "tool_use" || c.type === "tool_result");
     expect(toolChunks).toHaveLength(0);
+  });
+
+  it("resets the cumulative-text watermark across multi-turn streams (e.g. after tool use)", async () => {
+    // Repro for the bug where text from a second agent turn was silently
+    // truncated by the watermark left over from the previous turn. OpenClaw
+    // emits assistant text per-turn (not stream-wide cumulative), so when a
+    // new turn starts at length 0, the client must reset its watermark.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Tell me something with tools");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Turn 1 — assistant says it will look something up. 67 chars.
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Ich werde die Dokumentation zu Knowledge Base Agents konsultieren." },
+      },
+    });
+
+    // Tool round-trip between the turns.
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "tool", data: { phase: "start", tool: "docs_read" } },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "docs_read", output: "..." },
+      },
+    });
+
+    // Turn 2 — finale answer, length-wise SHORTER at first than turn 1's
+    // total length (this is what tripped the old watermark). The full final
+    // text is longer than turn 1, but the early frames are not.
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Guten Tag!" },
+      },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Guten Tag! Hier ist eine umfassende Erklärung." },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const concatenatedText = chunks
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+
+    // The full text from BOTH turns must be present — none of turn 2 may be
+    // silently truncated by a leftover watermark.
+    expect(concatenatedText).toContain(
+      "Ich werde die Dokumentation zu Knowledge Base Agents konsultieren.",
+    );
+    expect(concatenatedText).toContain("Guten Tag! Hier ist eine umfassende Erklärung.");
+
+    // The cumulative-length fallback path must also emit a boundary 'done'
+    // so downstream consumers can split the two turns into separate
+    // assistant messages (parity with the preferred `delta` path).
+    const turn1Text = chunks.findIndex(
+      (c) => c.type === "text" && c.text.includes("Knowledge Base Agents konsultieren"),
+    );
+    const turn2Text = chunks.findIndex((c) => c.type === "text" && c.text.includes("Guten Tag"));
+    expect(turn1Text).toBeGreaterThanOrEqual(0);
+    expect(turn2Text).toBeGreaterThan(turn1Text);
+    const between = chunks.slice(turn1Text + 1, turn2Text);
+    expect(between.some((c) => c.type === "done")).toBe(true);
+  });
+
+  it("emits a 'done' chunk between turns so downstream consumers can separate assistant messages", async () => {
+    // OpenClaw sends one final `res` per whole stream, not per turn.
+    // Turn boundaries are only visible in the event sequence (a new
+    // assistant event where `delta === text` after we've already seen
+    // content). The client should emit a `done` chunk at each such
+    // boundary so Pinchy's router can rotate messageIds and the browser
+    // can render two separate bubbles — matching what OpenClaw persists.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Tell me about X");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Turn 1 — assistant announces tool use, entire text in one event
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Let me look that up.", delta: "Let me look that up." },
+      },
+    });
+
+    // Turn 2 starts — OpenClaw's per-turn accumulator restarts, so delta
+    // equals text again. The client must notice and emit a done marker
+    // between the two text chunks.
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Here is the answer.", delta: "Here is the answer." },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    // Expected sequence: text(turn1), done(between), text(turn2), done(final)
+    const seq = chunks.map((c) => c.type);
+    expect(seq).toEqual(["text", "done", "text", "done"]);
+    expect(chunks[0].type === "text" && chunks[0].text).toBe("Let me look that up.");
+    expect(chunks[2].type === "text" && chunks[2].text).toBe("Here is the answer.");
+  });
+
+  it("does not emit a spurious 'done' between the first token and subsequent tokens of the same turn", async () => {
+    // Regression: on providers that stream token-by-token, the first
+    // event of a turn has delta === text (because text starts at length
+    // equal to the delta). That must NOT be interpreted as a turn
+    // boundary — the boundary check also requires cumulativeLength > 0
+    // (meaning we've already seen text from a previous turn).
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Hi");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Token-by-token streaming for a single turn
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "assistant", data: { text: "Hel", delta: "Hel" } },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "assistant", data: { text: "Hello", delta: "lo" } },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "assistant", data: { text: "Hello!", delta: "!" } },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    // Only the final done marker — no interstitial done in the middle
+    // of a single turn.
+    const doneBeforeFinal = chunks.slice(0, -1).filter((c) => c.type === "done");
+    expect(doneBeforeFinal).toHaveLength(0);
+    // All text should still be there
+    const joined = chunks
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
+    expect(joined).toBe("Hello!");
+  });
+
+  it("uses the OpenClaw-provided 'delta' field when present, instead of computing it from cumulative text", async () => {
+    // Modern OpenClaw releases include `delta` on every assistant event:
+    // the just-added slice. Using it directly avoids any cumulative-text
+    // arithmetic and is robust across turn boundaries.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Hello");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // Turn 1 with explicit deltas
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "I will look this up.", delta: "I will look this up." },
+      },
+    });
+
+    // Tool round-trip
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { runId: requestId, stream: "tool", data: { phase: "start", tool: "lookup" } },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "lookup", output: "x" },
+      },
+    });
+
+    // Turn 2 streamed token-by-token via delta (text restarts at 0 on
+    // OpenClaw's side, but the delta carries the truth and we don't care
+    // about the cumulative length any more).
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Hi", delta: "Hi" },
+      },
+    });
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Hi there", delta: " there" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const textOnly = chunks.filter((c) => c.type === "text").map((c) => c.text);
+    expect(textOnly).toEqual(["I will look this up.", "Hi", " there"]);
   });
 });
