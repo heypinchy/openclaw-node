@@ -71,12 +71,24 @@ export interface ChatOptions {
   clientMessageId?: string;
 }
 
+/**
+ * A single chunk from a streaming chat response.
+ *
+ * - `text` — incremental assistant output
+ * - `tool_use` / `tool_result` — tool invocation lifecycle
+ * - `agent_start` / `agent_end` — per-run lifecycle boundaries (optional, useful for progress UI)
+ * - `error` — terminal failure (provider auth/quota, RPC errors, ...)
+ * - `done` — end of one assistant turn (multi-turn streams emit several)
+ * - `userMessagePersisted` — fired when the Gateway has acknowledged and persisted the user message
+ */
 export type ChatChunk =
   | { type: "text"; text: string }
   | { type: "tool_use"; text: string }
   | { type: "tool_result"; text: string }
   | { type: "done"; text: string }
   | { type: "error"; text: string }
+  | { type: "agent_start"; text: string }
+  | { type: "agent_end"; text: string }
   | {
       type: "userMessagePersisted";
       clientMessageId: string;
@@ -367,6 +379,7 @@ export class OpenClawClient extends EventEmitter {
     let done = false;
     let resolveChunk: (() => void) | null = null;
     let cumulativeLength = 0;
+    let errorEmitted = false;
 
     // Register in _activeChats so chatAbort() can terminate this generator
     this._activeChats.set(abortKey, () => {
@@ -447,6 +460,26 @@ export class OpenClawClient extends EventEmitter {
               }
               resolveChunk?.();
             }
+          } else if (stream === "lifecycle") {
+            const phase = data?.phase as string | undefined;
+            if (phase === "start") {
+              chunks.push({ type: "agent_start", text: "" });
+              resolveChunk?.();
+            } else if (phase === "end") {
+              chunks.push({ type: "agent_end", text: "" });
+              resolveChunk?.();
+            } else if (phase === "error") {
+              const rawError = data?.error;
+              const errorText =
+                typeof rawError === "string" && rawError.trim() ? rawError : "LLM request failed.";
+              if (!errorEmitted) {
+                errorEmitted = true;
+                chunks.push({ type: "error", text: errorText });
+                resolveChunk?.();
+              }
+            }
+            // Unknown phases silently ignored — forward-compatible with future
+            // OpenClaw additions (e.g. "compaction", "retry").
           }
         }
       }
@@ -464,7 +497,8 @@ export class OpenClawClient extends EventEmitter {
           return;
         }
         // Propagate error responses as error chunks
-        if (!res.ok && res.error?.message) {
+        if (!res.ok && res.error?.message && !errorEmitted) {
+          errorEmitted = true;
           chunks.push({ type: "error", text: res.error.message });
         }
         done = true;
