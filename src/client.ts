@@ -343,30 +343,7 @@ export class OpenClawClient extends EventEmitter {
     yield* this._streamAgentRequest(id, abortKey, onAccepted);
   }
 
-  // re-triggers assistant response without appending a new user message
-  async *continueLastTurn(options: {
-    sessionKey: string;
-    agentId?: string;
-    timeout?: number;
-  }): AsyncGenerator<ChatChunk> {
-    const id = this.generateId();
-
-    this.send({
-      type: "req",
-      id,
-      method: "agent",
-      params: {
-        sessionKey: options.sessionKey,
-        ...(options.agentId !== undefined && { agentId: options.agentId }),
-        ...(options.timeout !== undefined && { timeout: options.timeout }),
-        idempotencyKey: id,
-      },
-    });
-
-    yield* this._streamAgentRequest(id, options.sessionKey);
-  }
-
-  // shared streaming machinery for chat() and continueLastTurn()
+  // shared streaming machinery for chat()
   private async *_streamAgentRequest(
     requestId: string,
     abortKey: string,
