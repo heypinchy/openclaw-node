@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.0 — 2026-05-05
+
+### Added
+
+- `pairingRequired` event surfaces OC 4.29+ pairing-required close reasons (close code 1008, reason `pairing required: <reason> (requestId: <id>)`). Consumers can drive an external approval flow (e.g. via `openclaw devices approve <requestId>` from inside the gateway container) and rely on auto-reconnect to recover.
+- `parsePairingRequiredReason()` exported helper for parsing close-reason strings.
+- `PairingRequiredEvent` type exported from package root.
+- `pairingRequired` added to `ClientEventMap` (type-level documentation for `.on()` consumers).
+
+### Notes
+
+- No behavioral change for already-paired devices or for setups that approve pairings out-of-band.
+- This event surfaces the condition that previously caused infinite reconnect loops with no diagnostic.
+
 ## [0.7.0] - 2026-04-28
 
 ### Removed
