@@ -5,10 +5,35 @@ import {
   type ClientRole,
   type ConnectParams,
   type HelloOk,
+  type PairingRequiredEvent,
   type ProtocolEvent,
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
+
+const PAIRING_PREFIX = "pairing required";
+
+/**
+ * Parse an OC pairing-required close reason. Format examples:
+ *   "pairing required"
+ *   "pairing required: scope-upgrade"
+ *   "pairing required (requestId: req-abc)"
+ *   "pairing required: scope-upgrade (requestId: req-abc)"
+ *
+ * Source of truth: OC dist/connect-error-details-*.js#buildPairingConnectCloseReason.
+ * Returns null if the raw string doesn't start with "pairing required".
+ */
+export function parsePairingRequiredReason(raw: string): PairingRequiredEvent | null {
+  if (!raw.startsWith(PAIRING_PREFIX)) return null;
+  const m = raw.match(/^pairing required(?::\s*([^()]+?))?(?:\s*\(requestId:\s*([^)]+)\))?\s*$/);
+  if (!m) return { raw };
+  const [, reason, requestId] = m;
+  return {
+    raw,
+    reason: reason?.trim() || undefined,
+    requestId: requestId?.trim() || undefined,
+  };
+}
 import {
   loadOrCreateDeviceIdentity,
   buildSignedDevice,
@@ -273,8 +298,16 @@ export class OpenClawClient extends EventEmitter {
         this.maybeReconnect();
       };
 
-      const onClose = () => {
+      const onClose = (event?: { code?: number; reason?: string }) => {
         this._isConnected = false;
+        // OC 4.29+: gateway closes with code 1008 + "pairing required: …" when a non-loopback
+        // peer needs operator-side approval. Surface as a typed event so consumers can drive
+        // an external approval flow (e.g. via `openclaw devices approve <requestId>` from inside
+        // the gateway container) or at minimum log the requestId for diagnostics.
+        if (event?.code === 1008 && typeof event.reason === "string") {
+          const parsed = parsePairingRequiredReason(event.reason);
+          if (parsed) this.emit("pairingRequired", parsed);
+        }
         this.emit("disconnected", { reason: "closed" });
         this.handleConnectFailure(reject);
         this.maybeReconnect();
