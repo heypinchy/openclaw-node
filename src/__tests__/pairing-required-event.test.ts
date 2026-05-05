@@ -84,6 +84,12 @@ describe("pairingRequired event", () => {
     getMockWs().simulateClose(1008, "pairing required (requestId: r1)");
 
     expect(pairingHandler).toHaveBeenCalledOnce();
+    expect(pairingHandler).toHaveBeenCalledWith({
+      requestId: "r1",
+      reason: undefined,
+      raw: "pairing required (requestId: r1)",
+    });
     expect(disconnectedHandler).toHaveBeenCalledOnce();
+    expect(disconnectedHandler).toHaveBeenCalledWith({ reason: "closed" });
   });
 });
