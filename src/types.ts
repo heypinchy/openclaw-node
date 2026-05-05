@@ -184,6 +184,27 @@ export type ClientEventMap = {
   disconnected: { reason: string; code?: number };
   error: Error;
   event: ProtocolEvent;
+  pairingRequired: PairingRequiredEvent;
   "protocol:event": ProtocolEvent;
   "protocol:response": ProtocolResponse;
 };
+
+/**
+ * Emitted when the gateway closes the WebSocket with a pairing-required
+ * reason (close code 1008, reason starts with "pairing required").
+ *
+ * In OpenClaw 4.29+, non-loopback peers (e.g. Pinchy connecting from a
+ * Docker container IP) cannot pair silently — the gateway queues a pair
+ * request and closes the WS with this reason. An external approval path
+ * (e.g. `openclaw devices approve <requestId>` from inside the gateway
+ * container) must drive the request to "approved" before the next
+ * reconnect attempt will succeed.
+ */
+export interface PairingRequiredEvent {
+  /** Pairing request ID, if present in the close reason. */
+  requestId?: string;
+  /** OC pairing reason ("not-paired", "scope-upgrade", "role-upgrade", "metadata-upgrade") if parsed. */
+  reason?: string;
+  /** The raw close reason string, for diagnostics. */
+  raw: string;
+}
