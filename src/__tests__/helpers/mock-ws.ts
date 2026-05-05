@@ -42,9 +42,9 @@ export class MockWebSocket {
     for (const cb of this.listeners["open"] || []) cb();
   }
 
-  simulateClose(code?: number) {
+  simulateClose(code?: number, reason?: string) {
     this.readyState = MockWebSocket.CLOSED;
-    for (const cb of this.listeners["close"] || []) cb({ code });
+    for (const cb of this.listeners["close"] || []) cb({ code, reason });
   }
 
   simulateError(err: Error) {
