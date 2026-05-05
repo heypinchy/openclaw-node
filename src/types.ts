@@ -184,6 +184,7 @@ export type ClientEventMap = {
   disconnected: { reason: string; code?: number };
   error: Error;
   event: ProtocolEvent;
+  pairingRequired: PairingRequiredEvent;
   "protocol:event": ProtocolEvent;
   "protocol:response": ProtocolResponse;
 };

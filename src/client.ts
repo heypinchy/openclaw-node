@@ -10,6 +10,13 @@ import {
   type ProtocolMessage,
   type ProtocolResponse,
 } from "./types";
+import {
+  loadOrCreateDeviceIdentity,
+  buildSignedDevice,
+  saveDeviceToken,
+  clearDeviceToken,
+  type DeviceIdentityData,
+} from "./device";
 
 const PAIRING_PREFIX = "pairing required";
 
@@ -34,13 +41,6 @@ export function parsePairingRequiredReason(raw: string): PairingRequiredEvent | 
     requestId: requestId?.trim() || undefined,
   };
 }
-import {
-  loadOrCreateDeviceIdentity,
-  buildSignedDevice,
-  saveDeviceToken,
-  clearDeviceToken,
-  type DeviceIdentityData,
-} from "./device";
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
