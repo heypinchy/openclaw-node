@@ -405,6 +405,78 @@ describe("Chat streaming", () => {
     }
   });
 
+  it("passes provider and model overrides through to params for image attachments to the right model", async () => {
+    // Why: the Gateway's `agent` RPC resolves the session model with
+    // `resolveSessionModelRef(cfg, entry, undefined)` — agentId is hard-coded
+    // to undefined inside server-methods, so the model lookup falls back to
+    // the gateway's default model rather than the agent's configured one.
+    // Without these overrides the vision-capability check sees the wrong
+    // model and silently rejects every image upload with
+    // `UnsupportedAttachmentError: active model does not accept image inputs`.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const gen = client.chat("What's in this image?", {
+      sessionKey: "sess-1",
+      agentId: "agent-1",
+      provider: "ollama-cloud",
+      model: "gemini-3-flash-preview",
+    });
+    const iterPromise = gen.next();
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.params.provider).toBe("ollama-cloud");
+    expect(sentMsg.params.model).toBe("gemini-3-flash-preview");
+
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "accepted" },
+    });
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "ok", result: { payloads: [] } },
+    });
+
+    await iterPromise;
+    for await (const _ of gen) {
+      // consume
+    }
+  });
+
+  it("omits provider and model from params when not provided", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const gen = client.chat("Hello plain");
+    const iterPromise = gen.next();
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.params.provider).toBeUndefined();
+    expect(sentMsg.params.model).toBeUndefined();
+
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "accepted" },
+    });
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { runId: sentMsg.id, status: "ok", result: { payloads: [] } },
+    });
+
+    await iterPromise;
+    for await (const _ of gen) {
+      // consume
+    }
+  });
+
   it("omits attachments from params when not provided", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 — 2026-05-11
+
+### Added
+
+- `ChatOptions.provider` / `ChatOptions.model` overrides forwarded to the Gateway's `agent` RPC. When set together, the Gateway's vision-capability check resolves against the explicit pair instead of falling back to its default model. Set both fields to work around the Gateway issue where `resolveSessionModelRef(cfg, entry, undefined)` discards `agentId` inside the `agent` RPC handler, which makes image attachments fail with `UnsupportedAttachmentError: active model does not accept image inputs` even on vision-capable per-agent models.
+
+### Notes
+
+- Backwards-compatible: omitting both fields preserves the existing behavior.
+- Forward-compatible with a future Gateway-side fix that honours `agentId` directly.
+
 ## 0.8.0 — 2026-05-05
 
 ### Added
