@@ -92,6 +92,20 @@ export interface ChatOptions {
   extraSystemPrompt?: string;
   label?: string;
   timeout?: number;
+  /**
+   * Explicit provider override forwarded to the Gateway's `agent` RPC.
+   *
+   * The Gateway resolves the session's model with `resolveSessionModelRef(cfg,
+   * entry, undefined)` — `agentId` is hard-coded to `undefined` inside
+   * server-methods, so without an override the lookup falls back to the
+   * gateway-wide default model. That breaks the vision-capability check for
+   * image attachments because the wrong model is consulted. Callers that
+   * know which provider/model the agent runs on (e.g. Pinchy with its own
+   * agent table) should set both fields so the Gateway sees the real pair.
+   */
+  provider?: string;
+  /** See `provider` — set together with it. */
+  model?: string;
   // when provided, yields a userMessagePersisted chunk once the Gateway acknowledges receipt
   clientMessageId?: string;
 }
@@ -355,6 +369,8 @@ export class OpenClawClient extends EventEmitter {
         }),
         ...(options?.label !== undefined && { label: options.label }),
         ...(options?.timeout !== undefined && { timeout: options.timeout }),
+        ...(options?.provider !== undefined && { provider: options.provider }),
+        ...(options?.model !== undefined && { model: options.model }),
         idempotencyKey: id,
       },
     });
