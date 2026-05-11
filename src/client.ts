@@ -5,6 +5,7 @@ import {
   type ClientRole,
   type ConnectParams,
   type HelloOk,
+  type PairingRequiredEvent,
   type ProtocolEvent,
   type ProtocolMessage,
   type ProtocolResponse,
@@ -16,6 +17,30 @@ import {
   clearDeviceToken,
   type DeviceIdentityData,
 } from "./device";
+
+const PAIRING_PREFIX = "pairing required";
+
+/**
+ * Parse an OC pairing-required close reason. Format examples:
+ *   "pairing required"
+ *   "pairing required: scope-upgrade"
+ *   "pairing required (requestId: req-abc)"
+ *   "pairing required: scope-upgrade (requestId: req-abc)"
+ *
+ * Source of truth: OC dist/connect-error-details-*.js#buildPairingConnectCloseReason.
+ * Returns null if the raw string doesn't start with "pairing required".
+ */
+export function parsePairingRequiredReason(raw: string): PairingRequiredEvent | null {
+  if (!raw.startsWith(PAIRING_PREFIX)) return null;
+  const m = raw.match(/^pairing required(?::\s*([^()]+?))?(?:\s*\(requestId:\s*([^)]+)\))?\s*$/);
+  if (!m) return { raw };
+  const [, reason, requestId] = m;
+  return {
+    raw,
+    reason: reason?.trim() || undefined,
+    requestId: requestId?.trim() || undefined,
+  };
+}
 
 // Use Node.js built-in WebSocket (22+) or fall back to `ws`
 const getWebSocket = (): typeof WebSocket => {
@@ -67,6 +92,20 @@ export interface ChatOptions {
   extraSystemPrompt?: string;
   label?: string;
   timeout?: number;
+  /**
+   * Explicit provider override forwarded to the Gateway's `agent` RPC.
+   *
+   * The Gateway resolves the session's model with `resolveSessionModelRef(cfg,
+   * entry, undefined)` — `agentId` is hard-coded to `undefined` inside
+   * server-methods, so without an override the lookup falls back to the
+   * gateway-wide default model. That breaks the vision-capability check for
+   * image attachments because the wrong model is consulted. Callers that
+   * know which provider/model the agent runs on (e.g. Pinchy with its own
+   * agent table) should set both fields so the Gateway sees the real pair.
+   */
+  provider?: string;
+  /** See `provider` — set together with it. */
+  model?: string;
   // when provided, yields a userMessagePersisted chunk once the Gateway acknowledges receipt
   clientMessageId?: string;
 }
@@ -273,8 +312,16 @@ export class OpenClawClient extends EventEmitter {
         this.maybeReconnect();
       };
 
-      const onClose = () => {
+      const onClose = (event?: { code?: number; reason?: string }) => {
         this._isConnected = false;
+        // OC 4.29+: gateway closes with code 1008 + "pairing required: …" when a non-loopback
+        // peer needs operator-side approval. Surface as a typed event so consumers can drive
+        // an external approval flow (e.g. via `openclaw devices approve <requestId>` from inside
+        // the gateway container) or at minimum log the requestId for diagnostics.
+        if (event?.code === 1008 && typeof event.reason === "string") {
+          const parsed = parsePairingRequiredReason(event.reason);
+          if (parsed) this.emit("pairingRequired", parsed);
+        }
         this.emit("disconnected", { reason: "closed" });
         this.handleConnectFailure(reject);
         this.maybeReconnect();
@@ -322,6 +369,8 @@ export class OpenClawClient extends EventEmitter {
         }),
         ...(options?.label !== undefined && { label: options.label }),
         ...(options?.timeout !== undefined && { timeout: options.timeout }),
+        ...(options?.provider !== undefined && { provider: options.provider }),
+        ...(options?.model !== undefined && { model: options.model }),
         idempotencyKey: id,
       },
     });
@@ -343,30 +392,7 @@ export class OpenClawClient extends EventEmitter {
     yield* this._streamAgentRequest(id, abortKey, onAccepted);
   }
 
-  // re-triggers assistant response without appending a new user message
-  async *continueLastTurn(options: {
-    sessionKey: string;
-    agentId?: string;
-    timeout?: number;
-  }): AsyncGenerator<ChatChunk> {
-    const id = this.generateId();
-
-    this.send({
-      type: "req",
-      id,
-      method: "agent",
-      params: {
-        sessionKey: options.sessionKey,
-        ...(options.agentId !== undefined && { agentId: options.agentId }),
-        ...(options.timeout !== undefined && { timeout: options.timeout }),
-        idempotencyKey: id,
-      },
-    });
-
-    yield* this._streamAgentRequest(id, options.sessionKey);
-  }
-
-  // shared streaming machinery for chat() and continueLastTurn()
+  // shared streaming machinery for chat()
   private async *_streamAgentRequest(
     requestId: string,
     abortKey: string,

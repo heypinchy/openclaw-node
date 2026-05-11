@@ -1,4 +1,4 @@
-export { OpenClawClient } from "./client";
+export { OpenClawClient, parsePairingRequiredReason } from "./client";
 export type { OpenClawClientOptions, ChatOptions, ChatChunk } from "./client";
 export { isValidProtocolMessage } from "./types";
 export type {
@@ -8,6 +8,7 @@ export type {
   AuthParams,
   DeviceIdentity,
   HelloOk,
+  PairingRequiredEvent,
   ProtocolRequest,
   ProtocolResponse,
   ProtocolEvent,

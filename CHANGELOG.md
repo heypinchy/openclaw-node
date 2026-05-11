@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 — 2026-05-11
+
+### Added
+
+- `ChatOptions.provider` / `ChatOptions.model` overrides forwarded to the Gateway's `agent` RPC. When set together, the Gateway's vision-capability check resolves against the explicit pair instead of falling back to its default model. Set both fields to work around the Gateway issue where `resolveSessionModelRef(cfg, entry, undefined)` discards `agentId` inside the `agent` RPC handler, which makes image attachments fail with `UnsupportedAttachmentError: active model does not accept image inputs` even on vision-capable per-agent models.
+
+### Notes
+
+- Backwards-compatible: omitting both fields preserves the existing behavior.
+- Forward-compatible with a future Gateway-side fix that honours `agentId` directly.
+
+## 0.8.0 — 2026-05-05
+
+### Added
+
+- `pairingRequired` event surfaces OC 4.29+ pairing-required close reasons (close code 1008, reason `pairing required: <reason> (requestId: <id>)`). Consumers can drive an external approval flow (e.g. via `openclaw devices approve <requestId>` from inside the gateway container) and rely on auto-reconnect to recover.
+- `parsePairingRequiredReason()` exported helper for parsing close-reason strings.
+- `PairingRequiredEvent` type exported from package root.
+- `pairingRequired` added to `ClientEventMap` (type-level documentation for `.on()` consumers).
+
+### Notes
+
+- No behavioral change for already-paired devices or for setups that approve pairings out-of-band.
+- This event surfaces the condition that previously caused infinite reconnect loops with no diagnostic.
+
+## [0.7.0] - 2026-04-28
+
+### Removed
+
+- **BREAKING:** `continueLastTurn({ sessionKey })` is gone. The method was designed to send an agent request without a `message` field so the Gateway would re-run from existing session history, but OpenClaw's `AgentParamsSchema` requires `message: NonEmptyString` — so the call was rejected by every recent gateway version. The supported pattern for retry is to resend the user's last message via `chat()`; that's what the gateway's protocol was always designed for.
+
+## [0.6.0] - 2026-04-28
+
+### Added
+
+- `agent_start` and `agent_end` chunk types on `ChatChunk` — emitted on lifecycle phase transitions so consumers can render turn boundaries.
+- Lifecycle errors are now surfaced as `{ type: "error" }` chunks, deduped against res-error to avoid double-reporting.
+
 ## [0.5.0] - 2026-04-23
 
 ### Added
