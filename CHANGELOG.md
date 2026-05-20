@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING:** advertise Gateway protocol v4 (`minProtocol`/`maxProtocol` = 4) in the connect frame. OC 2026.5.12 raised the minimum required client protocol from 3 to 4 (PR #80725, "require v4 clients and stream explicit `deltaText`/`replace` frames"). Gateways at 2026.5.12+ close v3 clients with code 1002 (`protocol mismatch ... min=3 max=3 expected=4 probeMin=4`) before the handshake completes. This release moves openclaw-node to v4 so it can connect to current Gateway releases.
 
+### Security
+
+- Bump `ws` dependency range to `^8.20.1` to pick up the patched release for [GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx) (uninitialized memory disclosure in `ws` <8.20.1).
+
 ### Notes
 
 - Wire-level chat streaming compatibility is unchanged: OC 2026.5.18 still broadcasts the legacy `event: "agent"` payload (`stream: "assistant"`, `data.delta` / `data.text`) alongside the new `event: "chat"` v4 payload, so the existing assistant-text chunk handler keeps working.

@@ -73,6 +73,6 @@
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "ws": "^8.0.0"
+    "ws": "^8.20.1"
   }
 }
