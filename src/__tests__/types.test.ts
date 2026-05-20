@@ -206,11 +206,11 @@ describe("Protocol types", () => {
     it("has required fields: type, protocol, policy", () => {
       const hello: HelloOk = {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
       };
       expect(hello.type).toBe("hello-ok");
-      expect(hello.protocol).toBe(3);
+      expect(hello.protocol).toBe(4);
       expect(hello.policy.tickIntervalMs).toBe(15000);
       expect(hello.policy.maxPayload).toBe(25000000);
       expect(hello.policy.maxBufferedBytes).toBe(50000000);
@@ -219,7 +219,7 @@ describe("Protocol types", () => {
     it("can include optional auth info", () => {
       const hello: HelloOk = {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
         auth: {
           deviceToken: "token-123",
@@ -235,7 +235,7 @@ describe("Protocol types", () => {
     it("can include server info, features, and canvasHostUrl", () => {
       const hello: HelloOk = {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
         server: {
           version: "1.2.3",
@@ -260,8 +260,8 @@ describe("Protocol types", () => {
   describe("ConnectParams", () => {
     it("accepts minimal connect params with only required fields", () => {
       const params: ConnectParams = {
-        minProtocol: 3,
-        maxProtocol: 3,
+        minProtocol: 4,
+        maxProtocol: 4,
         client: {
           id: "gateway-client",
           version: "0.1.0",
@@ -269,14 +269,14 @@ describe("Protocol types", () => {
           mode: "backend",
         },
       };
-      expect(params.minProtocol).toBe(3);
+      expect(params.minProtocol).toBe(4);
       expect(params.client.id).toBe("gateway-client");
     });
 
     it("accepts all optional fields", () => {
       const params: ConnectParams = {
-        minProtocol: 3,
-        maxProtocol: 3,
+        minProtocol: 4,
+        maxProtocol: 4,
         client: {
           id: "gateway-client",
           version: "0.1.0",

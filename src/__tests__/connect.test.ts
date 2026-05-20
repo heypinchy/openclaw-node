@@ -55,7 +55,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
       },
     });
@@ -64,7 +64,7 @@ describe("Connect/handshake", () => {
     const helloOk = await connectPromise;
     expect(helloOk).toEqual({
       type: "hello-ok",
-      protocol: 3,
+      protocol: 4,
       policy: { tickIntervalMs: 15000 },
     });
   });
@@ -90,7 +90,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
       },
     });
@@ -100,7 +100,7 @@ describe("Connect/handshake", () => {
     expect(connectedHandler).toHaveBeenCalledOnce();
     expect(connectedHandler).toHaveBeenCalledWith({
       type: "hello-ok",
-      protocol: 3,
+      protocol: 4,
       policy: { tickIntervalMs: 15000 },
     });
   });
@@ -117,6 +117,35 @@ describe("Connect/handshake", () => {
 
     await expect(connectPromise).rejects.toThrow("Connection refused");
     expect(errorHandler).toHaveBeenCalledOnce();
+  });
+
+  it("advertises Gateway protocol v4 in the connect request", async () => {
+    // OC 2026.5.12+ rejects clients that don't advertise v4 with a
+    // [ws] protocol mismatch close (code 1002). The Gateway compares
+    // minProtocol/maxProtocol against its own PROTOCOL_VERSION = 4
+    // (see openclaw dist/plugin-sdk/.../gateway/protocol/version.d.ts).
+    const connectPromise = client.connect();
+    const ws = getMockWs();
+
+    ws.simulateOpen();
+    ws.simulateMessage({
+      type: "event",
+      event: "connect.challenge",
+      payload: { nonce: "nonce-proto", ts: 1700000000000 },
+    });
+
+    const connectReq = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(connectReq.params.minProtocol).toBe(4);
+    expect(connectReq.params.maxProtocol).toBe(4);
+
+    // Finish handshake so afterEach can disconnect cleanly.
+    ws.simulateMessage({
+      type: "res",
+      id: connectReq.id,
+      ok: true,
+      payload: { type: "hello-ok", protocol: 4, policy: { tickIntervalMs: 15000 } },
+    });
+    await connectPromise;
   });
 
   it("includes client metadata in the connect request", async () => {
@@ -155,7 +184,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
       },
     });
@@ -197,7 +226,7 @@ describe("Connect/handshake", () => {
       type: "res",
       id: connectReq.id,
       ok: true,
-      payload: { type: "hello-ok", protocol: 3, policy: { tickIntervalMs: 15000 } },
+      payload: { type: "hello-ok", protocol: 4, policy: { tickIntervalMs: 15000 } },
     });
     await connectPromise;
     await paired.disconnect();
@@ -223,7 +252,7 @@ describe("Connect/handshake", () => {
       type: "res",
       id: connectReq.id,
       ok: true,
-      payload: { type: "hello-ok", protocol: 3, policy: { tickIntervalMs: 15000 } },
+      payload: { type: "hello-ok", protocol: 4, policy: { tickIntervalMs: 15000 } },
     });
     await connectPromise;
   });
@@ -258,7 +287,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
         auth: {
           deviceToken: "issued-by-gateway",
@@ -304,7 +333,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
         auth: {
           deviceToken: "rotated-device-token",
@@ -336,7 +365,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
         // no auth field
       },
@@ -429,7 +458,7 @@ describe("Connect/handshake", () => {
       type: "res",
       id: secondReq.id,
       ok: true,
-      payload: { type: "hello-ok", protocol: 3, policy: { tickIntervalMs: 15000 } },
+      payload: { type: "hello-ok", protocol: 4, policy: { tickIntervalMs: 15000 } },
     });
     await second;
     await c.disconnect();
@@ -466,7 +495,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
         auth: { deviceToken: "valid-token", role: "operator", scopes: ["operator.admin"] },
       },
@@ -527,7 +556,7 @@ describe("Connect/handshake", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
       },
     });
