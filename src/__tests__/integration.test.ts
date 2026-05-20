@@ -37,7 +37,7 @@ describe.skipIf(!shouldRun)("Integration: OpenClaw Gateway", () => {
   it("connects and receives HelloOk", () => {
     expect(client.isConnected).toBe(true);
     expect(helloOk.type).toBe("hello-ok");
-    expect(helloOk.protocol).toBe(3);
+    expect(helloOk.protocol).toBe(4);
   });
 
   it("health check returns successfully", async () => {

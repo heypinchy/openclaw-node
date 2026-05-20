@@ -201,7 +201,7 @@ describe("Auto-reconnect with exponential backoff", () => {
       ok: true,
       payload: {
         type: "hello-ok",
-        protocol: 3,
+        protocol: 4,
         policy: { tickIntervalMs: 15000 },
       },
     });
