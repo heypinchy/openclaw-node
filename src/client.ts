@@ -135,7 +135,7 @@ export type ChatChunk =
       persistedAt: number;
     };
 
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 4;
 const DEFAULT_SCOPES = ["operator.read", "operator.write"];
 
 export class OpenClawClient extends EventEmitter {
