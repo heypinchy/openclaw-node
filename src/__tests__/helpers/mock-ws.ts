@@ -92,7 +92,7 @@ export async function completeHandshake(client: {
     ok: true,
     payload: {
       type: "hello-ok",
-      protocol: 3,
+      protocol: 4,
       policy: { tickIntervalMs: 15000, maxPayload: 25000000, maxBufferedBytes: 50000000 },
     },
   });

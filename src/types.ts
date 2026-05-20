@@ -1,7 +1,7 @@
 /**
  * OpenClaw Gateway WebSocket Protocol Types
  *
- * Based on the Gateway protocol v3 specification.
+ * Based on the Gateway protocol v4 specification.
  * See: https://docs.openclaw.ai
  */
 
