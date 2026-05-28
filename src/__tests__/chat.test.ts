@@ -1394,6 +1394,169 @@ describe("Chat streaming", () => {
     expect(errorChunk!.text).toBe("LLM request failed.");
   });
 
+  it("exposes the OC-correlated runId on every ChatChunk type", async () => {
+    // Why: Pinchy's Tier 2 streaming-resume work for issue #310 needs the
+    // server-correlated runId on every chunk so it can route mid-stream
+    // events to the right `ActiveRuns` entry — including across a
+    // disconnect+reconnect where the Pinchy ↔ browser WS dies but the
+    // OpenClaw stream lives. OC's Gateway already tags every event payload
+    // with `runId` (and uses it internally for routing); this test pins the
+    // contract that openclaw-node forwards it to consumers.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Hi", { clientMessageId: "cm-runid-test" });
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    // accepted → userMessagePersisted chunk
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    // lifecycle.start → agent_start
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "start", startedAt: Date.now() },
+      },
+    });
+
+    // assistant text → text
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "assistant",
+        data: { text: "Hi!", delta: "Hi!" },
+      },
+    });
+
+    // tool.start → tool_use
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "start", tool: "calc", input: { a: 1 } },
+      },
+    });
+
+    // tool.end → tool_result + done (since cumulativeLength > 0)
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: { phase: "end", tool: "calc", output: "42" },
+      },
+    });
+
+    // lifecycle.end → agent_end
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "end", endedAt: Date.now() },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    // Every chunk must carry runId.
+    for (const chunk of chunks) {
+      expect(chunk.runId, `chunk of type ${chunk.type} missing runId`).toBe(requestId);
+    }
+
+    // Verify each major chunk type was actually exercised so the assertion
+    // above is meaningful coverage and not vacuously true.
+    const types = new Set(chunks.map((c) => c.type));
+    expect(types).toContain("userMessagePersisted");
+    expect(types).toContain("agent_start");
+    expect(types).toContain("text");
+    expect(types).toContain("tool_use");
+    expect(types).toContain("tool_result");
+    expect(types).toContain("agent_end");
+    expect(types).toContain("done");
+  });
+
+  it("exposes runId on the error ChatChunk produced from a lifecycle-error event", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("Hi");
+
+    const consumePromise = (async () => {
+      for await (const chunk of gen) {
+        chunks.push(chunk);
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "lifecycle",
+        data: { phase: "error", error: "boom" },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const errorChunk = chunks.find((c) => c.type === "error");
+    expect(errorChunk).toBeDefined();
+    expect(errorChunk!.runId).toBe(requestId);
+  });
+
   it("ignores unknown lifecycle phases (forward-compat)", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;

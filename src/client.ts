@@ -119,20 +119,29 @@ export interface ChatOptions {
  * - `error` — terminal failure (provider auth/quota, RPC errors, ...)
  * - `done` — end of one assistant turn (multi-turn streams emit several)
  * - `userMessagePersisted` — fired when the Gateway has acknowledged and persisted the user message
+ *
+ * Every chunk carries the Gateway-correlated `runId` so consumers can route
+ * mid-stream events to a server-side run record. The Gateway tags every
+ * event payload with `runId` internally; openclaw-node forwards it
+ * unchanged. For requests where the Gateway has not yet returned an
+ * `accepted` response (e.g. an immediate `res.ok=false` error before any
+ * event), the request id is used as the runId (the Gateway uses
+ * `runId === requestId` for fresh runs).
  */
 export type ChatChunk =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; text: string }
-  | { type: "tool_result"; text: string }
-  | { type: "done"; text: string }
-  | { type: "error"; text: string }
-  | { type: "agent_start"; text: string }
-  | { type: "agent_end"; text: string }
+  | { type: "text"; text: string; runId: string }
+  | { type: "tool_use"; text: string; runId: string }
+  | { type: "tool_result"; text: string; runId: string }
+  | { type: "done"; text: string; runId: string }
+  | { type: "error"; text: string; runId: string }
+  | { type: "agent_start"; text: string; runId: string }
+  | { type: "agent_end"; text: string; runId: string }
   | {
       type: "userMessagePersisted";
       clientMessageId: string;
       sessionKey: string | undefined;
       persistedAt: number;
+      runId: string;
     };
 
 const PROTOCOL_VERSION = 4;
@@ -378,15 +387,13 @@ export class OpenClawClient extends EventEmitter {
     const abortKey = options?.sessionKey || id;
     const onAccepted =
       options?.clientMessageId != null
-        ? () => {
-            const chunk: ChatChunk = {
-              type: "userMessagePersisted",
-              clientMessageId: options.clientMessageId!,
-              sessionKey: options.sessionKey,
-              persistedAt: Date.now(),
-            };
-            return chunk;
-          }
+        ? (runId: string): ChatChunk => ({
+            type: "userMessagePersisted",
+            clientMessageId: options.clientMessageId!,
+            sessionKey: options.sessionKey,
+            persistedAt: Date.now(),
+            runId,
+          })
         : undefined;
 
     yield* this._streamAgentRequest(id, abortKey, onAccepted);
@@ -396,7 +403,7 @@ export class OpenClawClient extends EventEmitter {
   private async *_streamAgentRequest(
     requestId: string,
     abortKey: string,
-    onAccepted?: () => ChatChunk,
+    onAccepted?: (runId: string) => ChatChunk,
   ): AsyncGenerator<ChatChunk> {
     // Collect streaming chunks until done.
     // OpenClaw sends cumulative text in "agent" events (stream: "assistant"),
@@ -406,6 +413,11 @@ export class OpenClawClient extends EventEmitter {
     let resolveChunk: (() => void) | null = null;
     let cumulativeLength = 0;
     let errorEmitted = false;
+    // Latest runId observed on the wire. Defaults to requestId because the
+    // Gateway uses `runId === requestId` for fresh runs — this ensures the
+    // terminal `done` chunk has a usable runId even if no event ever
+    // arrived (immediate ok/abort).
+    let lastRunId: string = requestId;
 
     // Register in _activeChats so chatAbort() can terminate this generator
     this._activeChats.set(abortKey, () => {
@@ -424,6 +436,13 @@ export class OpenClawClient extends EventEmitter {
           const payload = event.payload as Record<string, unknown>;
           const stream = payload.stream as string | undefined;
           const data = payload.data as Record<string, unknown> | undefined;
+          // Forward the Gateway-tagged runId on every chunk so consumers
+          // (e.g. Pinchy's ActiveRuns map) can correlate events to a
+          // server-side run record across a disconnect+reconnect. The guard
+          // above already verified `payload.runId === requestId`, so this
+          // is just a typed extraction.
+          const runId = payload.runId as string;
+          lastRunId = runId;
 
           if (stream === "assistant") {
             const delta = data?.delta as string | undefined;
@@ -440,10 +459,10 @@ export class OpenClawClient extends EventEmitter {
                 // (cumulativeLength > 0), otherwise the very first chunk
                 // of the whole stream would be flagged as a boundary too.
                 if (delta === text && cumulativeLength > 0) {
-                  chunks.push({ type: "done", text: "" });
+                  chunks.push({ type: "done", text: "", runId });
                 }
                 cumulativeLength = (text ?? "").length;
-                chunks.push({ type: "text", text: delta });
+                chunks.push({ type: "text", text: delta, runId });
                 resolveChunk?.();
               }
             } else if (text !== undefined) {
@@ -453,13 +472,13 @@ export class OpenClawClient extends EventEmitter {
               // watermark, treat that as a turn boundary (this path is
               // relevant when no tool event sat between the two turns).
               if (text.length < cumulativeLength) {
-                chunks.push({ type: "done", text: "" });
+                chunks.push({ type: "done", text: "", runId });
                 cumulativeLength = 0;
               }
               if (text.length > cumulativeLength) {
                 const newText = text.slice(cumulativeLength);
                 cumulativeLength = text.length;
-                chunks.push({ type: "text", text: newText });
+                chunks.push({ type: "text", text: newText, runId });
                 resolveChunk?.();
               }
             }
@@ -468,12 +487,12 @@ export class OpenClawClient extends EventEmitter {
             const toolName = (data?.tool as string) ?? "unknown";
 
             if (phase === "start") {
-              chunks.push({ type: "tool_use", text: toolName });
+              chunks.push({ type: "tool_use", text: toolName, runId });
               resolveChunk?.();
             } else if (phase === "end") {
               const output = data?.output;
               const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
-              chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}` });
+              chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}`, runId });
               // A completed tool call ends the current assistant turn. Only
               // emit the turn-boundary marker if we've actually seen
               // assistant text in this turn (cumulativeLength > 0) — back-
@@ -481,7 +500,7 @@ export class OpenClawClient extends EventEmitter {
               // produce spurious boundaries. Then reset the watermark so
               // the legacy `text`-only path correctly tracks the next turn.
               if (cumulativeLength > 0) {
-                chunks.push({ type: "done", text: "" });
+                chunks.push({ type: "done", text: "", runId });
                 cumulativeLength = 0;
               }
               resolveChunk?.();
@@ -489,10 +508,10 @@ export class OpenClawClient extends EventEmitter {
           } else if (stream === "lifecycle") {
             const phase = data?.phase as string | undefined;
             if (phase === "start") {
-              chunks.push({ type: "agent_start", text: "" });
+              chunks.push({ type: "agent_start", text: "", runId });
               resolveChunk?.();
             } else if (phase === "end") {
-              chunks.push({ type: "agent_end", text: "" });
+              chunks.push({ type: "agent_end", text: "", runId });
               resolveChunk?.();
             } else if (phase === "error") {
               const rawError = data?.error;
@@ -500,7 +519,7 @@ export class OpenClawClient extends EventEmitter {
                 typeof rawError === "string" && rawError.trim() ? rawError : "LLM request failed.";
               if (!errorEmitted) {
                 errorEmitted = true;
-                chunks.push({ type: "error", text: errorText });
+                chunks.push({ type: "error", text: errorText, runId });
                 resolveChunk?.();
               }
             }
@@ -512,12 +531,18 @@ export class OpenClawClient extends EventEmitter {
       if (msg.type === "res" && (msg as ProtocolResponse).id === requestId) {
         const res = msg as ProtocolResponse;
         const payload = res.payload as Record<string, unknown> | undefined;
+        // The Gateway uses `runId === requestId` for fresh runs; if the
+        // payload tags a runId we forward it verbatim, otherwise we fall
+        // back to the requestId so error chunks fired before any event
+        // (e.g. immediate res.ok=false) still carry a usable id.
+        const runId = (payload?.runId as string | undefined) ?? requestId;
+        lastRunId = runId;
         // "accepted" means the Gateway has received and persisted the user
         // message in the session. Emit a userMessagePersisted chunk so
         // callers can transition a message from "sending" to "sent" state.
         if (payload?.status === "accepted") {
           if (onAccepted) {
-            chunks.push(onAccepted());
+            chunks.push(onAccepted(runId));
             resolveChunk?.();
           }
           return;
@@ -525,7 +550,7 @@ export class OpenClawClient extends EventEmitter {
         // Propagate error responses as error chunks
         if (!res.ok && res.error?.message && !errorEmitted) {
           errorEmitted = true;
-          chunks.push({ type: "error", text: res.error.message });
+          chunks.push({ type: "error", text: res.error.message, runId });
         }
         done = true;
         resolveChunk?.();
@@ -548,7 +573,7 @@ export class OpenClawClient extends EventEmitter {
       while (chunks.length > 0) {
         yield chunks.shift()!;
       }
-      yield { type: "done", text: "" };
+      yield { type: "done", text: "", runId: lastRunId };
     } finally {
       this.off("_raw", onMessage);
       this._activeChats.delete(abortKey);
