@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.11.0 — 2026-05-27
+
+### Added
+
+- Every `ChatChunk` variant now carries the Gateway-correlated `runId`. The Gateway already tags every event payload with `runId` and openclaw-node has been filtering on it internally since 0.x; this release forwards it to consumers so they can route mid-stream events to a server-side run record across a disconnect+reconnect (e.g. Pinchy's Tier 2 streaming-resume work — see [heypinchy/pinchy#310](https://github.com/heypinchy/pinchy/issues/310)).
+
+### Changed
+
+- **BREAKING (TypeScript only):** `ChatChunk` is a discriminated union with a new required `runId: string` field on every variant. The change is purely additive at runtime (no chunk shape changed semantics), but any code that constructs `ChatChunk` literals — e.g. mocks, tests, or middleware — will need to add `runId`. Real consumers that only read chunks from `client.chat()` need no code changes other than picking up the new typings.
+- `userMessagePersisted` chunk: gains `runId: string` next to its existing `clientMessageId`, `sessionKey`, `persistedAt` fields.
+
+### Notes
+
+- Wire protocol unchanged. Compatible with the same Gateway versions as 0.10.0 (OC ≥ 2026.5.12).
+- For runs that error before the Gateway sends an `accepted` response, openclaw-node falls back to `runId === requestId` (which is the Gateway's own contract for fresh runs).
+
 ## 0.10.0 — 2026-05-20
 
 ### Changed
