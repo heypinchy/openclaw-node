@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import {
   isValidProtocolMessage,
+  type AgentsListResult,
   type ChatAttachment,
   type ClientRole,
   type ConnectParams,
@@ -678,6 +679,26 @@ export class OpenClawClient extends EventEmitter {
         ...options,
       });
       return res.payload;
+    },
+  };
+
+  /**
+   * Agent helpers.
+   *
+   * - `list()` — list agents from the Gateway's **runtime** config.
+   *
+   * `agents.list` is backed by the same runtime view (`getRuntimeConfig()`)
+   * that the Gateway's chat-dispatch handler checks before accepting a message,
+   * so it is the authoritative readiness signal: if an agent id appears here, a
+   * `chat`/`agent` dispatch for that id will not be rejected with
+   * "unknown agent id". This is distinct from `config.get()`, which reads the
+   * config FILE and can lead the applied runtime by seconds-to-minutes while a
+   * write propagates.
+   */
+  readonly agents = {
+    list: async (): Promise<AgentsListResult> => {
+      const res = await this.request("agents.list", {});
+      return res.payload as unknown as AgentsListResult;
     },
   };
 

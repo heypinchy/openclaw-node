@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.12.0 — 2026-06-03
+
+### Added
+
+- `client.agents.list()` wraps the Gateway's `agents.list` RPC and returns the **runtime** agent list (`{ defaultId, mainKey, scope, agents: [{ id, name, identity, … }] }`). The Gateway derives this from the same `getRuntimeConfig()` view its chat-dispatch handler checks before accepting a message, so it is the authoritative readiness signal: once an agent `id` appears here, a `chat`/`agent` dispatch for that id will not be rejected with `unknown agent id`. This is distinct from `config.get()`, which reads the config FILE and can lead the applied runtime by seconds-to-minutes while a write propagates — the root of the freshly-created-agent dispatch race in Pinchy's E2E suite (see [heypinchy/pinchy#464](https://github.com/heypinchy/pinchy/issues/464)). Polling/deadline policy intentionally lives in the consumer, not here.
+- New exported types `AgentsListResult`, `AgentSummary`, `AgentIdentity`.
+
+### Notes
+
+- Wire protocol unchanged (protocol v4). Compatible with the same Gateway versions as 0.11.0 (OC ≥ 2026.5.12); `agents.list` is advertised by OC 2026.5.28. Consumers can guard with `client.hasMethod("agents.list")` before calling on older Gateways.
+
 ## 0.11.0 — 2026-05-27
 
 ### Added
