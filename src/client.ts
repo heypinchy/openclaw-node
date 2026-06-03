@@ -248,6 +248,27 @@ export class OpenClawClient extends EventEmitter {
     this.currentAttempt = null;
   }
 
+  /**
+   * Reject every in-flight request when the connection is lost. Without this, a
+   * request whose response is still pending when the socket closes (e.g. the
+   * Gateway restarts mid-`config.apply`) would stall for the full 30 s request
+   * timeout instead of failing fast — and across a storm of config pushes those
+   * stalls compound, which is how a freshly-created agent's config could fail to
+   * reach OpenClaw's runtime within the caller's retry budget
+   * (heypinchy/pinchy#464). The message includes "Not connected to OpenClaw
+   * Gateway" so callers can recognize a disconnect and retry the moment the
+   * Gateway is back. Each pending entry's `reject` clears its own timeout.
+   */
+  private rejectPendingRequests(reason: string): void {
+    if (this.pendingRequests.size === 0) return;
+    const error = new Error(`Not connected to OpenClaw Gateway: ${reason}`);
+    // Snapshot then clear first, so a reject handler that re-enters can't see a
+    // half-drained map.
+    const pending = Array.from(this.pendingRequests.values());
+    this.pendingRequests.clear();
+    for (const entry of pending) entry.reject(error);
+  }
+
   get isConnected(): boolean {
     return this._isConnected;
   }
@@ -316,14 +337,21 @@ export class OpenClawClient extends EventEmitter {
         this.emit("error", error);
         reject(error);
         // Node.js built-in WebSocket does not fire "close" after connection error,
-        // so trigger reconnect directly from the error handler as well.
+        // so trigger reconnect directly from the error handler as well — and
+        // reject in-flight requests here too, since without a following "close"
+        // they would otherwise stall to the 30 s timeout.
         this._isConnected = false;
+        this.rejectPendingRequests("connection error");
         this.handleConnectFailure();
         this.maybeReconnect();
       };
 
       const onClose = (event?: { code?: number; reason?: string }) => {
         this._isConnected = false;
+        // Fail in-flight requests immediately rather than letting them stall to
+        // the 30 s request timeout — the caller's reconnect/retry logic recovers
+        // far faster (see rejectPendingRequests).
+        this.rejectPendingRequests("connection closed");
         // OC 4.29+: gateway closes with code 1008 + "pairing required: …" when a non-loopback
         // peer needs operator-side approval. Surface as a typed event so consumers can drive
         // an external approval flow (e.g. via `openclaw devices approve <requestId>` from inside

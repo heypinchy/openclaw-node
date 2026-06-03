@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.12.1 — 2026-06-03
+
+### Fixed
+
+- **In-flight requests now reject immediately when the connection drops**, instead of stalling until the 30 s request timeout. When the Gateway restarts (e.g. its first-time secrets-bootstrap restart) while a `config.get`/`config.apply` (or any other RPC) is awaiting its response, the WebSocket closes with the request still pending. Previously that request was orphaned and only failed after the 30 s timeout; across a storm of config pushes those stalls compounded so a freshly-created agent's config could fail to reach OpenClaw's runtime within the caller's retry budget, leaving chat dispatch stuck on `unknown agent id` (root cause of the Pinchy dispatch-probe E2E flake, [heypinchy/pinchy#464](https://github.com/heypinchy/pinchy/issues/464)). Both the `close` and the `error` handlers now reject every pending request with an error whose message contains `Not connected to OpenClaw Gateway`, so callers recognize a disconnect and retry the moment the Gateway is back rather than stalling 30 s.
+
 ## 0.12.0 — 2026-06-03
 
 ### Added
