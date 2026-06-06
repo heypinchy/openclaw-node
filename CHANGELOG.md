@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.12.1 — 2026-06-03
+
+### Fixed
+
+- **In-flight requests now reject immediately when the connection drops**, instead of stalling until the 30 s request timeout. When the Gateway restarts (e.g. its first-time secrets-bootstrap restart) while a `config.get`/`config.apply` (or any other RPC) is awaiting its response, the WebSocket closes with the request still pending. Previously that request was orphaned and only failed after the 30 s timeout; across a storm of config pushes those stalls compounded so a freshly-created agent's config could fail to reach OpenClaw's runtime within the caller's retry budget, leaving chat dispatch stuck on `unknown agent id` (root cause of the Pinchy dispatch-probe E2E flake, [heypinchy/pinchy#464](https://github.com/heypinchy/pinchy/issues/464)). Both the `close` and the `error` handlers now reject every pending request with an error whose message contains `Not connected to OpenClaw Gateway`, so callers recognize a disconnect and retry the moment the Gateway is back rather than stalling 30 s.
+
+## 0.12.0 — 2026-06-03
+
+### Added
+
+- `client.agents.list()` wraps the Gateway's `agents.list` RPC and returns the **runtime** agent list (`{ defaultId, mainKey, scope, agents: [{ id, name, identity, … }] }`). The Gateway derives this from the same `getRuntimeConfig()` view its chat-dispatch handler checks before accepting a message, so it is the authoritative readiness signal: once an agent `id` appears here, a `chat`/`agent` dispatch for that id will not be rejected with `unknown agent id`. This is distinct from `config.get()`, which reads the config FILE and can lead the applied runtime by seconds-to-minutes while a write propagates — the root of the freshly-created-agent dispatch race in Pinchy's E2E suite (see [heypinchy/pinchy#464](https://github.com/heypinchy/pinchy/issues/464)). Polling/deadline policy intentionally lives in the consumer, not here.
+- New exported types `AgentsListResult`, `AgentSummary`, `AgentIdentity`.
+
+### Notes
+
+- Wire protocol unchanged (protocol v4). Compatible with the same Gateway versions as 0.11.0 (OC ≥ 2026.5.12); `agents.list` is advertised by OC 2026.5.28. Consumers can guard with `client.hasMethod("agents.list")` before calling on older Gateways.
+
 ## 0.11.0 — 2026-05-27
 
 ### Added
