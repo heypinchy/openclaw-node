@@ -17,4 +17,7 @@ export type {
   ClientEventMap,
   ChatAttachment,
   ConfigGetResult,
+  AgentIdentity,
+  AgentSummary,
+  AgentsListResult,
 } from "./types";

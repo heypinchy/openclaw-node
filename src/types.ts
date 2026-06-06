@@ -170,6 +170,45 @@ export interface SessionMessage {
   timestamp?: string;
 }
 
+// --- Agents ---
+
+/**
+ * Identity block for a configured agent, as surfaced by the Gateway's
+ * `agents.list` RPC. All fields are optional.
+ */
+export interface AgentIdentity {
+  name?: string;
+  theme?: string;
+  emoji?: string;
+  avatar?: string;
+  avatarUrl?: string;
+}
+
+/**
+ * A single agent entry from `agents.list`. The Gateway derives this from its
+ * **runtime** config (the same view its dispatch handler checks for
+ * "unknown agent id"), so the presence of an `id` here means the Gateway will
+ * accept a chat dispatch for that agent. Fields beyond `id` are best-effort and
+ * may vary by Gateway version, hence the open index signature.
+ */
+export interface AgentSummary {
+  id: string;
+  name?: string;
+  identity?: AgentIdentity;
+  [key: string]: unknown;
+}
+
+/**
+ * Result of `agents.list`. Mirrors OpenClaw's `listAgentsForGateway()`: a small
+ * header plus the runtime agent array.
+ */
+export interface AgentsListResult {
+  defaultId: string;
+  mainKey?: string;
+  scope?: string;
+  agents: AgentSummary[];
+}
+
 // --- Config ---
 
 export interface ConfigGetResult {
