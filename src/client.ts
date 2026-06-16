@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import {
   isValidProtocolMessage,
   type AgentsListResult,
+  type AgentWaitResult,
   type ChatAttachment,
   type ClientRole,
   type ConnectParams,
@@ -800,6 +801,27 @@ export class OpenClawClient extends EventEmitter {
       return res.payload;
     },
   };
+
+  /**
+   * Wait for a run to reach a terminal state via the `agent.wait` RPC.
+   *
+   * This is the Gateway's authoritative run-liveness oracle: given a `runId` it
+   * long-polls and returns the run's current or terminal state. While the run
+   * is still going the result has `status: "pending"`; once it ends the result
+   * has `status: "ok"` with `endedAt` and `stopReason` set. If the poll window
+   * elapses first the result has `status: "timeout"`.
+   *
+   * @param runId - The run to wait on.
+   * @param opts.timeoutMs - How long the Gateway should long-poll before
+   *   returning a "timeout" result. Omit to use the Gateway default.
+   */
+  async agentWait(runId: string, opts?: { timeoutMs?: number }): Promise<AgentWaitResult> {
+    const res = await this.request("agent.wait", {
+      runId,
+      ...(opts?.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }),
+    });
+    return res.payload as unknown as AgentWaitResult;
+  }
 
   /**
    * Send a raw protocol request and wait for the response.
