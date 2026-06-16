@@ -21,4 +21,5 @@ export type {
   AgentSummary,
   AgentsListResult,
   AgentWaitResult,
+  SessionDescribeResult,
 } from "./types";

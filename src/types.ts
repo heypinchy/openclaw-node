@@ -230,6 +230,25 @@ export interface AgentWaitResult {
   providerStarted?: boolean;
 }
 
+/**
+ * Result of `sessions.describe`. The Gateway's view of a single session: whether
+ * it exists, its current state, and any in-flight run. Use it to answer "does
+ * this session exist / is a run active?" without polling history. The Gateway
+ * owns the exact shape — these fields are best-effort and may vary by Gateway
+ * version.
+ */
+export interface SessionDescribeResult {
+  key?: string;
+  /** Whether the Gateway knows this session. */
+  exists?: boolean;
+  /** Current session state, e.g. "idle" | "processing" | "waiting". */
+  status?: string;
+  /** The in-flight run for this session, or null when idle. */
+  activeRunId?: string | null;
+  /** Epoch millis of the last activity on this session. */
+  lastActivityAt?: number;
+}
+
 // --- Config ---
 
 export interface ConfigGetResult {
