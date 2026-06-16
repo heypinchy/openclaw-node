@@ -724,39 +724,59 @@ export class OpenClawClient extends EventEmitter {
      * Subscribe to a session's live event stream via `sessions.messages.subscribe`.
      *
      * The Gateway then pushes every event for this session to this connection —
-     * word-for-word assistant deltas (`event: "agent"`), transcript snapshots
-     * (`event: "session.message"`), tool events, and lifecycle/state changes —
-     * regardless of which connection triggered the run. `handler` is invoked with
-     * each matching `ProtocolEvent` (filtered to `payload.sessionKey === key`).
+     * such as word-for-word assistant deltas (`event: "agent"`), transcript
+     * snapshots (`event: "session.message"`), tool events, and lifecycle/state
+     * changes — regardless of which connection triggered the run. `handler` is
+     * invoked with each `ProtocolEvent` whose `payload.sessionKey` matches the
+     * subscribed session (the caller-supplied key OR the canonical key the
+     * Gateway echoes in the subscribe response — so canonicalization can't
+     * silently drop events).
      *
      * The listener is registered before the subscribe request is sent, so no
-     * event is missed. Call the returned `unsubscribe()` to stop and tell the
-     * Gateway to drop the subscription.
+     * event is missed in the subscribe window. The subscription does NOT survive
+     * a reconnect (the Gateway drops it when the socket closes) — re-subscribe on
+     * the client's `connected` event if you need it to persist. Call the returned
+     * `unsubscribe()` to stop; it always removes the local listener and makes a
+     * best-effort unsubscribe RPC (it never throws, so teardown is safe even when
+     * the socket is already closed).
      */
     subscribeMessages: async (
       key: string,
       handler: (event: ProtocolEvent) => void,
       opts?: { agentId?: string },
     ): Promise<{ unsubscribe: () => Promise<void> }> => {
+      // Match both the caller-supplied key and the Gateway's canonical key
+      // (added once the subscribe response arrives) so a canonicalized
+      // `sessionKey` on pushed events is still delivered.
+      const matchKeys = new Set<string>([key]);
       const listener = (event: ProtocolEvent) => {
-        const payload = event.payload as { sessionKey?: string } | undefined;
-        if (payload?.sessionKey === key) handler(event);
+        const sessionKey = (event.payload as { sessionKey?: string } | undefined)?.sessionKey;
+        if (sessionKey !== undefined && matchKeys.has(sessionKey)) handler(event);
       };
       this.on("event", listener);
       const params = {
         key,
         ...(opts?.agentId !== undefined && { agentId: opts.agentId }),
       };
+      let res: ProtocolResponse;
       try {
-        await this.request("sessions.messages.subscribe", params);
+        res = await this.request("sessions.messages.subscribe", params);
       } catch (err) {
         this.off("event", listener);
         throw err;
       }
+      const canonicalKey = (res.payload as { key?: string } | undefined)?.key;
+      if (typeof canonicalKey === "string") matchKeys.add(canonicalKey);
       return {
         unsubscribe: async () => {
           this.off("event", listener);
-          await this.request("sessions.messages.unsubscribe", params);
+          // Best-effort: the local listener is already gone, so a closed socket
+          // (e.g. during teardown) must not turn cleanup into a thrown error.
+          try {
+            await this.request("sessions.messages.unsubscribe", params);
+          } catch {
+            // ignore — nothing left to clean up locally
+          }
         },
       };
     },
