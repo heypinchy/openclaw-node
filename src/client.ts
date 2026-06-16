@@ -720,6 +720,46 @@ export class OpenClawClient extends EventEmitter {
       });
       return res.payload as unknown as SessionDescribeResult;
     },
+    /**
+     * Subscribe to a session's live event stream via `sessions.messages.subscribe`.
+     *
+     * The Gateway then pushes every event for this session to this connection —
+     * word-for-word assistant deltas (`event: "agent"`), transcript snapshots
+     * (`event: "session.message"`), tool events, and lifecycle/state changes —
+     * regardless of which connection triggered the run. `handler` is invoked with
+     * each matching `ProtocolEvent` (filtered to `payload.sessionKey === key`).
+     *
+     * The listener is registered before the subscribe request is sent, so no
+     * event is missed. Call the returned `unsubscribe()` to stop and tell the
+     * Gateway to drop the subscription.
+     */
+    subscribeMessages: async (
+      key: string,
+      handler: (event: ProtocolEvent) => void,
+      opts?: { agentId?: string },
+    ): Promise<{ unsubscribe: () => Promise<void> }> => {
+      const listener = (event: ProtocolEvent) => {
+        const payload = event.payload as { sessionKey?: string } | undefined;
+        if (payload?.sessionKey === key) handler(event);
+      };
+      this.on("event", listener);
+      const params = {
+        key,
+        ...(opts?.agentId !== undefined && { agentId: opts.agentId }),
+      };
+      try {
+        await this.request("sessions.messages.subscribe", params);
+      } catch (err) {
+        this.off("event", listener);
+        throw err;
+      }
+      return {
+        unsubscribe: async () => {
+          this.off("event", listener);
+          await this.request("sessions.messages.unsubscribe", params);
+        },
+      };
+    },
   };
 
   /**
