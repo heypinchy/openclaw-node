@@ -114,4 +114,120 @@ describe("sessions.subscribeMessages", () => {
     });
     expect(events).toHaveLength(1);
   });
+
+  it("delivers events tagged with the Gateway's canonical key", async () => {
+    const canonical = "agent:agt-1:direct:usr-1#canonical";
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+    const events: ProtocolEvent[] = [];
+    const subPromise = client.sessions.subscribeMessages(KEY, (e) => events.push(e));
+
+    const subReq = JSON.parse(ws.sent[sentBefore]);
+    // Gateway echoes a DIFFERENT canonical key than the caller supplied.
+    ws.simulateMessage({
+      type: "res",
+      id: subReq.id,
+      ok: true,
+      payload: { subscribed: true, key: canonical },
+    });
+    await subPromise;
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: { sessionKey: canonical, runId: "r1", stream: "assistant", data: { delta: "hi" } },
+    });
+    expect(events).toHaveLength(1);
+    expect((events[0].payload as { sessionKey?: string }).sessionKey).toBe(canonical);
+  });
+
+  it("isolates concurrent subscriptions to different sessions", async () => {
+    const keyB = "agent:agt-2:direct:usr-2";
+    const ws = getMockWs();
+
+    const aEvents: ProtocolEvent[] = [];
+    let s = ws.sent.length;
+    const subA = client.sessions.subscribeMessages(KEY, (e) => aEvents.push(e));
+    const aReq = JSON.parse(ws.sent[s]);
+    ws.simulateMessage({ type: "res", id: aReq.id, ok: true, payload: { subscribed: true, key: KEY } });
+    await subA;
+
+    const bEvents: ProtocolEvent[] = [];
+    s = ws.sent.length;
+    const subB = client.sessions.subscribeMessages(keyB, (e) => bEvents.push(e));
+    const bReq = JSON.parse(ws.sent[s]);
+    ws.simulateMessage({ type: "res", id: bReq.id, ok: true, payload: { subscribed: true, key: keyB } });
+    const handleB = await subB;
+
+    ws.simulateMessage({
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: KEY, message: { content: "for A" } },
+    });
+    expect(aEvents).toHaveLength(1);
+    expect(bEvents).toHaveLength(0);
+
+    // Unsubscribing B must not affect A.
+    s = ws.sent.length;
+    const unsubP = handleB.unsubscribe();
+    const unsubReq = JSON.parse(ws.sent[s]);
+    ws.simulateMessage({ type: "res", id: unsubReq.id, ok: true, payload: { subscribed: false } });
+    await unsubP;
+
+    ws.simulateMessage({
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: KEY, message: { content: "for A again" } },
+    });
+    expect(aEvents).toHaveLength(2);
+    expect(bEvents).toHaveLength(0);
+  });
+
+  it("removes the listener if the subscribe request rejects", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+    const events: ProtocolEvent[] = [];
+    const subPromise = client.sessions.subscribeMessages(KEY, (e) => events.push(e));
+
+    const subReq = JSON.parse(ws.sent[sentBefore]);
+    ws.simulateMessage({
+      type: "res",
+      id: subReq.id,
+      ok: false,
+      error: { message: "subscribe denied" },
+    });
+    await expect(subPromise).rejects.toThrow("subscribe denied");
+
+    // Listener must have been removed — a matching event is ignored.
+    ws.simulateMessage({
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: KEY, message: { content: "should be ignored" } },
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it("unsubscribe never throws even when the unsubscribe RPC fails", async () => {
+    // Same catch path as a send on an already-closed socket during teardown.
+    const { ws, events, handle } = await subscribe();
+
+    const sentBefore = ws.sent.length;
+    const unsubPromise = handle.unsubscribe();
+    const unsubReq = JSON.parse(ws.sent[sentBefore]);
+    ws.simulateMessage({
+      type: "res",
+      id: unsubReq.id,
+      ok: false,
+      error: { message: "unsubscribe failed" },
+    });
+    await expect(unsubPromise).resolves.toBeUndefined();
+
+    // Listener is still removed despite the failed RPC.
+    ws.simulateMessage({
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: KEY, message: { content: "after-failed-unsub" } },
+    });
+    expect(events).toHaveLength(0);
+  });
 });
