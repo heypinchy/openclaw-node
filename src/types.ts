@@ -209,6 +209,27 @@ export interface AgentsListResult {
   agents: AgentSummary[];
 }
 
+/**
+ * Result of `agent.wait`. The Gateway's authoritative run-liveness oracle:
+ * given a `runId`, it long-polls and reports the run's current or terminal
+ * state. `status` is the long-poll outcome ("pending" while still running,
+ * "ok" once it ended, "timeout" if the poll window elapsed first, "error" on
+ * failure). Terminal fields (`endedAt`, `stopReason`) are only set once the run
+ * has finished. Fields beyond `status` are best-effort and may vary by Gateway
+ * version.
+ */
+export interface AgentWaitResult {
+  status: "ok" | "pending" | "timeout" | "error";
+  runId?: string;
+  /** Epoch millis when the run finished; set once the run has ended. */
+  endedAt?: number;
+  stopReason?: string;
+  livenessState?: "working" | "paused" | "blocked" | "abandoned";
+  yielded?: boolean;
+  timeoutPhase?: string;
+  providerStarted?: boolean;
+}
+
 // --- Config ---
 
 export interface ConfigGetResult {
