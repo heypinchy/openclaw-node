@@ -16,29 +16,39 @@ jobs:
       - name: Check CI status on release commit
         run: |
           COMMIT_SHA="${{ github.sha }}"
-          echo "Checking CI check runs for commit $COMMIT_SHA ..."
+          echo "Checking the CI workflow run for commit $COMMIT_SHA ..."
 
-          # GitHub Actions uses the Checks API, not the Status API.
-          # Exclude this workflow's own check runs to avoid self-referential failure.
-          CHECKS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" \
-            --jq '.check_runs[] | select(.app.slug == "github-actions" and .name != "Verify CI passed" and .name != "Build & Publish") | {name, status, conclusion}')
+          # Gate ONLY on this repo's CI workflow (ci.yml), not on every
+          # github-actions check-run for the commit. GitHub's own "Dependabot
+          # Updates" recompute posts a "Dependabot" check-run (app.slug
+          # "github-actions") that can sit `in_progress` right after a dev-deps
+          # PR merges to main; gating on all check-runs blocked the v0.13.0
+          # release on that unrelated check. The CI workflow's run conclusion is
+          # `success` only when every CI job (Node matrix, Security audit, …)
+          # passed, so it is the authoritative, Dependabot-proof signal.
+          RUN=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$COMMIT_SHA&per_page=20" \
+            --jq '.workflow_runs | sort_by(.created_at) | last')
 
-          echo "Check runs:"
-          echo "$CHECKS" | jq -r '"\(.name): \(.status) / \(.conclusion)"'
+          if [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+            echo "ERROR: No CI workflow run found for $COMMIT_SHA."
+            echo "Ensure the CI workflow ran on the release commit before publishing."
+            exit 1
+          fi
 
-          # Fail if any check has not completed or has a non-success conclusion
-          FAILED=$(echo "$CHECKS" | jq -r 'select(.status != "completed" or (.conclusion != "success" and .conclusion != "skipped")) | .name')
-          if [ -n "$FAILED" ]; then
+          STATUS=$(echo "$RUN" | jq -r '.status')
+          CONCLUSION=$(echo "$RUN" | jq -r '.conclusion')
+          echo "CI workflow run: status=$STATUS conclusion=$CONCLUSION"
+          echo "$RUN" | jq -r '"  " + .html_url'
+
+          if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "success" ]; then
             echo ""
-            echo "ERROR: The following CI checks have not passed:"
-            echo "$FAILED"
-            echo ""
-            echo "Ensure all CI checks are green before creating a release."
+            echo "ERROR: CI has not passed on the release commit (status=$STATUS, conclusion=$CONCLUSION)."
+            echo "Ensure the CI workflow is green before creating a release."
             exit 1
           fi
 
           echo ""
-          echo "All CI checks passed."
+          echo "CI workflow passed."
         env:
           GH_TOKEN: ${{ github.token }}
 
