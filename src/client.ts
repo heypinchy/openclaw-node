@@ -710,10 +710,7 @@ export class OpenClawClient extends EventEmitter {
       });
       return res.payload;
     },
-    describe: async (
-      key: string,
-      opts?: { agentId?: string },
-    ): Promise<SessionDescribeResult> => {
+    describe: async (key: string, opts?: { agentId?: string }): Promise<SessionDescribeResult> => {
       const res = await this.request("sessions.describe", {
         key,
         ...(opts?.agentId !== undefined && { agentId: opts.agentId }),
