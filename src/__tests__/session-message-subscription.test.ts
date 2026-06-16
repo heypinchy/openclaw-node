@@ -37,7 +37,12 @@ describe("sessions.subscribeMessages", () => {
     const subPromise = client.sessions.subscribeMessages(KEY, (e) => events.push(e), opts);
 
     const subReq = JSON.parse(ws.sent[sentBefore]);
-    ws.simulateMessage({ type: "res", id: subReq.id, ok: true, payload: { subscribed: true, key: KEY } });
+    ws.simulateMessage({
+      type: "res",
+      id: subReq.id,
+      ok: true,
+      payload: { subscribed: true, key: KEY },
+    });
     const handle = await subPromise;
     return { ws, events, handle, subReq };
   }
@@ -72,7 +77,12 @@ describe("sessions.subscribeMessages", () => {
     ws.simulateMessage({
       type: "event",
       event: "agent",
-      payload: { sessionKey: KEY, runId: "run-1", stream: "assistant", data: { delta: "Hel", text: "Hel" } },
+      payload: {
+        sessionKey: KEY,
+        runId: "run-1",
+        stream: "assistant",
+        data: { delta: "Hel", text: "Hel" },
+      },
     });
     expect(events).toHaveLength(1);
     expect(events[0].event).toBe("agent");
@@ -149,14 +159,24 @@ describe("sessions.subscribeMessages", () => {
     let s = ws.sent.length;
     const subA = client.sessions.subscribeMessages(KEY, (e) => aEvents.push(e));
     const aReq = JSON.parse(ws.sent[s]);
-    ws.simulateMessage({ type: "res", id: aReq.id, ok: true, payload: { subscribed: true, key: KEY } });
+    ws.simulateMessage({
+      type: "res",
+      id: aReq.id,
+      ok: true,
+      payload: { subscribed: true, key: KEY },
+    });
     await subA;
 
     const bEvents: ProtocolEvent[] = [];
     s = ws.sent.length;
     const subB = client.sessions.subscribeMessages(keyB, (e) => bEvents.push(e));
     const bReq = JSON.parse(ws.sent[s]);
-    ws.simulateMessage({ type: "res", id: bReq.id, ok: true, payload: { subscribed: true, key: keyB } });
+    ws.simulateMessage({
+      type: "res",
+      id: bReq.id,
+      ok: true,
+      payload: { subscribed: true, key: keyB },
+    });
     const handleB = await subB;
 
     ws.simulateMessage({
