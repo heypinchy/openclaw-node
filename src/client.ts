@@ -3,6 +3,7 @@ import {
   isValidProtocolMessage,
   type AgentsListResult,
   type AgentWaitResult,
+  type SessionDescribeResult,
   type ChatAttachment,
   type ClientRole,
   type ConnectParams,
@@ -708,6 +709,16 @@ export class OpenClawClient extends EventEmitter {
         ...options,
       });
       return res.payload;
+    },
+    describe: async (
+      key: string,
+      opts?: { agentId?: string },
+    ): Promise<SessionDescribeResult> => {
+      const res = await this.request("sessions.describe", {
+        key,
+        ...(opts?.agentId !== undefined && { agentId: opts.agentId }),
+      });
+      return res.payload as unknown as SessionDescribeResult;
     },
   };
 
