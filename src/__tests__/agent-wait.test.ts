@@ -70,6 +70,26 @@ describe("agentWait", () => {
     await waitPromise;
   });
 
+  it("forwards an explicit timeoutMs of 0 (not dropped as falsy)", async () => {
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const waitPromise = client.agentWait("run-zero", { timeoutMs: 0 });
+
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    expect(sentMsg.params).toEqual({ runId: "run-zero", timeoutMs: 0 });
+    expect(sentMsg.params.timeoutMs).toBe(0);
+
+    ws.simulateMessage({
+      type: "res",
+      id: sentMsg.id,
+      ok: true,
+      payload: { status: "pending" },
+    });
+
+    await waitPromise;
+  });
+
   it("resolves to the response payload typed as AgentWaitResult", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
