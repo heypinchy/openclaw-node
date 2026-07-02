@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.13.1 — 2026-07-02
+
+### Fixed
+
+- **A device-identity persist failure no longer kills the client.** `loadOrCreateDeviceIdentity` ran its create-and-persist block outside the try/catch, so any filesystem error while writing the identity file — EACCES after a root backup-restore or root `docker exec`, ENOSPC on first boot, EROFS on hardened mounts — threw straight out of the `OpenClawClient` constructor. Callers constructing the client inside an async startup block saw only an `unhandledRejection`: the client was never created, `autoReconnect` never armed, and the process kept running with no gateway connection at all (took down Pinchy staging on 2026-07-02). Persistence is now best-effort: on failure the client continues with an ephemeral in-memory identity and emits a `DeviceIdentityPersistWarning` naming the path, the error, and the consequence (re-pair on every restart until the path is writable). The identity is generated once per process, so reconnects within the same process keep presenting the same approved device. (#38)
+
+## 0.13.0 — 2026-06-16
+
+### Added
+
+Liveness RPC wrappers for the chat-liveness redesign (#32):
+
+- `agentWait(runId, { timeoutMs? })` — wraps `agent.wait`, the gateway's authoritative run-liveness oracle (`AgentWaitResult`).
+- `sessions.describe(key, { agentId? })` — wraps `sessions.describe` (`SessionDescribeResult`).
+- `sessions.subscribeMessages(key, handler, { agentId? })` — subscribes to a session's live event stream (assistant deltas, transcript snapshots, lifecycle), returns `{ unsubscribe }`. Canonical-key-safe filtering, listener registered before subscribe, best-effort teardown.
+
+### Notes
+
+- Additive, no breaking changes.
+
 ## 0.12.1 — 2026-06-03
 
 ### Fixed
