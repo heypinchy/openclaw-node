@@ -222,4 +222,69 @@ describe("Device Identity", () => {
       expect(fs.existsSync(filePath)).toBe(false);
     });
   });
+
+  describe("persist failure resilience", () => {
+    // A persist failure must never take down the client: OpenClawClient calls
+    // loadOrCreateDeviceIdentity synchronously in its constructor, so a throw
+    // here kills the entire client — including autoReconnect — before the
+    // first connection attempt. Real-world triggers: identity file owned by
+    // another user after a root backup-restore or root docker-exec (EACCES),
+    // disk full on first boot (ENOSPC), read-only filesystems (EROFS).
+
+    // Path component is a regular file, so mkdirSync/writeFileSync fail with
+    // ENOTDIR regardless of uid — deterministic even when CI runs as root.
+    it("returns an ephemeral identity instead of throwing when the path is not creatable", () => {
+      const blocker = path.join(tmpDir, "blocker.txt");
+      fs.writeFileSync(blocker, "not a directory");
+      const filePath = path.join(blocker, "device-identity.json");
+
+      const identity = loadOrCreateDeviceIdentity(filePath);
+
+      expect(identity.deviceId).toMatch(/^[a-f0-9]{64}$/);
+      expect(identity.publicKeyPem).toContain("BEGIN PUBLIC KEY");
+      expect(identity.privateKeyPem).toContain("BEGIN PRIVATE KEY");
+    });
+
+    // The staging incident shape: the file exists but belongs to another user
+    // (mode 0o000 stands in for root:600) — the read fails AND the overwrite
+    // fails. chmod is a no-op for uid 0, hence the skipIf.
+    it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+      "returns an ephemeral identity when the file exists but is neither readable nor writable",
+      () => {
+        const filePath = path.join(tmpDir, "device-identity.json");
+        fs.writeFileSync(filePath, JSON.stringify({ version: 1 }), { mode: 0o000 });
+
+        const identity = loadOrCreateDeviceIdentity(filePath);
+
+        expect(identity.deviceId).toMatch(/^[a-f0-9]{64}$/);
+        expect(identity.privateKeyPem).toContain("BEGIN PRIVATE KEY");
+      },
+    );
+
+    it("emits a process warning naming the path when persistence fails", () => {
+      // Assert on the emitWarning call itself: 'warning' events fire async,
+      // so listening for them would race the event loop.
+      const emitted: unknown[] = [];
+      const original = process.emitWarning;
+      (process as { emitWarning: typeof process.emitWarning }).emitWarning = ((
+        ...args: Parameters<typeof process.emitWarning>
+      ) => {
+        emitted.push(args[0]);
+      }) as typeof process.emitWarning;
+
+      try {
+        const blocker = path.join(tmpDir, "blocker.txt");
+        fs.writeFileSync(blocker, "not a directory");
+        const filePath = path.join(blocker, "device-identity.json");
+
+        loadOrCreateDeviceIdentity(filePath);
+
+        expect(emitted).toHaveLength(1);
+        expect(String(emitted[0])).toContain(filePath);
+        expect(String(emitted[0])).toContain("ephemeral");
+      } finally {
+        (process as { emitWarning: typeof process.emitWarning }).emitWarning = original;
+      }
+    });
+  });
 });

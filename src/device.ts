@@ -83,20 +83,37 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentityData
 
   const identity = generateDeviceIdentity();
 
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
+  // Persistence is best-effort: this runs synchronously in the OpenClawClient
+  // constructor, so a throw here (EACCES after a root backup-restore, ENOSPC,
+  // read-only fs) would kill the client — including autoReconnect — before
+  // the first connection attempt. An ephemeral identity keeps the client
+  // alive; the trade-off is a fresh device pairing on every process restart
+  // until the underlying filesystem problem is fixed, which is what the
+  // warning tells the operator.
+  try {
+    const dir = path.dirname(filePath);
+    fs.mkdirSync(dir, { recursive: true });
 
-  const stored = {
-    version: 1,
-    deviceId: identity.deviceId,
-    publicKeyPem: identity.publicKeyPem,
-    privateKeyPem: identity.privateKeyPem,
-    createdAtMs: Date.now(),
-  };
+    const stored = {
+      version: 1,
+      deviceId: identity.deviceId,
+      publicKeyPem: identity.publicKeyPem,
+      privateKeyPem: identity.privateKeyPem,
+      createdAtMs: Date.now(),
+    };
 
-  fs.writeFileSync(filePath, JSON.stringify(stored, null, 2) + "\n", {
-    mode: 0o600,
-  });
+    fs.writeFileSync(filePath, JSON.stringify(stored, null, 2) + "\n", {
+      mode: 0o600,
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    process.emitWarning(
+      `Failed to persist device identity to ${filePath} (${reason}). ` +
+        "Continuing with an ephemeral identity; this device will need to " +
+        "re-pair with the gateway on every restart until the path is writable.",
+      "DeviceIdentityPersistWarning",
+    );
+  }
 
   return identity;
 }
