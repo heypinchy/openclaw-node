@@ -147,6 +147,36 @@ export type ChatChunk =
       runId: string;
     };
 
+/**
+ * Serialize a tool-result payload into the text carried by a `tool_result`
+ * chunk. The Gateway's `phase:"result"` payload is a `toTranscriptToolResult`
+ * object whose `content[]` holds the tool's output items; we join the text
+ * items so the consumer sees the tool's ACTUAL text output (with literal
+ * quotes), not a JSON-escaped envelope. Falls back to the raw string, or a
+ * JSON dump for shapes we don't recognize.
+ */
+export function toolResultText(payload: unknown): string {
+  if (typeof payload === "string") return payload;
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { content?: unknown }).content)
+  ) {
+    const items = (payload as { content: unknown[] }).content;
+    const texts = items
+      .filter(
+        (c): c is { type: "text"; text: string } =>
+          !!c &&
+          typeof c === "object" &&
+          (c as { type?: unknown }).type === "text" &&
+          typeof (c as { text?: unknown }).text === "string",
+      )
+      .map((c) => c.text);
+    if (texts.length > 0) return texts.join("\n");
+  }
+  return JSON.stringify(payload ?? "");
+}
+
 const PROTOCOL_VERSION = 4;
 const DEFAULT_SCOPES = ["operator.read", "operator.write"];
 
@@ -515,14 +545,22 @@ export class OpenClawClient extends EventEmitter {
             }
           } else if (stream === "tool") {
             const phase = data?.phase as string | undefined;
-            const toolName = (data?.tool as string) ?? "unknown";
+            // The Gateway names the tool in `name`; older releases used `tool`.
+            const toolName = (data?.tool as string) ?? (data?.name as string) ?? "unknown";
 
             if (phase === "start") {
               chunks.push({ type: "tool_use", text: toolName, runId });
               resolveChunk?.();
-            } else if (phase === "end") {
-              const output = data?.output;
-              const outputText = typeof output === "string" ? output : JSON.stringify(output ?? "");
+            } else if (phase === "end" || phase === "result") {
+              // A tool result. The current Gateway emits `phase:"result"` with a
+              // `result` object (`toTranscriptToolResult`, whose `content[].text`
+              // holds the tool's text output); older releases emitted
+              // `phase:"end"` with `output`. Support BOTH — without the `result`
+              // case the tool result never reaches consumers at all (the
+              // `end`/`output` shape is not what the current Gateway sends), so
+              // e.g. a marker a plugin writes into its output would be lost.
+              const payload = phase === "result" ? data?.result : data?.output;
+              const outputText = toolResultText(payload);
               chunks.push({ type: "tool_result", text: `${toolName}: ${outputText}`, runId });
               // A completed tool call ends the current assistant turn. Only
               // emit the turn-boundary marker if we've actually seen

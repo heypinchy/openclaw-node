@@ -132,6 +132,71 @@ describe("Chat streaming", () => {
     expect(chunks).toEqual(["Hello", " world", "!"]);
   });
 
+  it("emits a tool_result chunk from a gateway phase:'result' tool event", async () => {
+    // The Gateway emits tool results as `stream:"tool", phase:"result"` with a
+    // `name` field and a `result` object (`toTranscriptToolResult`, whose
+    // `content[].text` carries the tool's text output). Older releases used
+    // `phase:"end"`/`output`; we must handle BOTH so a consumer (e.g. Pinchy's
+    // agent→user file delivery) actually sees tool output — otherwise the tool
+    // result never reaches the web layer at all.
+    const ws = getMockWs();
+    const sentBefore = ws.sent.length;
+
+    const chunks: ChatChunk[] = [];
+    const gen = client.chat("download the invoice");
+    const consumePromise = (async () => {
+      for await (const chunk of gen) chunks.push(chunk);
+    })();
+
+    await new Promise((r) => setTimeout(r, 0));
+    const sentMsg = JSON.parse(ws.sent[sentBefore]);
+    const requestId = sentMsg.id;
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "accepted" },
+    });
+
+    ws.simulateMessage({
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: requestId,
+        stream: "tool",
+        data: {
+          phase: "result",
+          name: "email_get_attachment",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: 'saved <pinchy:file name="invoice.pdf" mime="application/pdf" zone="uploads" />',
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    ws.simulateMessage({
+      type: "res",
+      id: requestId,
+      ok: true,
+      payload: { runId: requestId, status: "ok", result: { payloads: [] } },
+    });
+
+    await consumePromise;
+
+    const toolResult = chunks.find((c) => c.type === "tool_result");
+    expect(toolResult).toBeDefined();
+    // Carries the tool name and the full serialized result, so a marker in the
+    // tool's text output survives to the consumer.
+    expect(toolResult!.text).toContain("email_get_attachment");
+    expect(toolResult!.text).toContain('<pinchy:file name="invoice.pdf"');
+  });
+
   it("does not terminate on accepted response, only on ok response", async () => {
     const ws = getMockWs();
     const sentBefore = ws.sent.length;
